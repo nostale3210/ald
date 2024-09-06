@@ -115,8 +115,8 @@ setup_dep() {
     pprint "Syncing image root to fs..."
     podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
     podman cp ald-tmp:/usr "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
-    podman cp ald-tmp:/usr/etc "${ALD_PATH:?}/$next_id/etc" &>/dev/null
     podman cp ald-tmp:/etc "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-tmp:/usr/etc/. "${ALD_PATH:?}/$next_id/etc" &>/dev/null
     ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
 
     pprint "Syncing system configuration..."
