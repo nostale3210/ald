@@ -15,6 +15,7 @@ print_help() {
     printf "\tswap\t\tReplace the currently active deployment with another specified, available one\n"
     printf "\trm\t\tRemove a specified, available deployment\n"
     printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
+    printf "\tself-update\tUpdate ALD and static binaries\n"
     printf "\tdep\t\tDeploy new versions\n"
     printf "\t\t\tOptions:\n"
     printf "\t\t\t\t-u\tPull newest image before deploying\n"
@@ -78,14 +79,14 @@ pull_image() {
     pprint "Checking for updates..."
     installed_image="$(podman inspect --format '{{.Created}}' "$SOURCE_IMAGE" 2>/dev/null)"
     remote_image="$(skopeo inspect --format '{{.Created}}' "docker://$SOURCE_IMAGE" 2>/dev/null)"
-    if [[ "$installed_image" != "$remote_image" ]]; then
+    if [[ "$installed_image" == "$remote_image" ]]; then
+        printf "Latest image already pulled. To create a new deployment anyways omit \"-u\".\n"
+        exit 0
+    else
         pprint "Pulling $SOURCE_IMAGE..."
         if [[ "$tput_support" == "y" ]]; then tput smcup; fi
         podman pull "$SOURCE_IMAGE"
         if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
-    else
-        printf "Latest image already pulled. To create a new deployment anyways omit \"-u\".\n"
-        exit 0
     fi
 }
 
@@ -242,6 +243,29 @@ init_ald() {
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
 
+update_ald() {
+    pprint "Initiating self-update..."
+    SOURCE_IMAGE="ghcr.io/nostale3210/ald-utils:latest"
+    pull_image
+
+    pprint "Retrieving updated files..."
+    podman create --name ald-utils "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-utils:/ald/ald "${ALD_PATH:?}/ald.bak" || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-utils:/ald/init.sh "${ALD_PATH:?}/init.bak" || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-utils:/ald/exch "${ALD_PATH:?}/exch.bak" || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-utils:/ald/busybox "${ALD_PATH:?}/busybox.bak" || fail_ex "$next_id" "Couldn't sync files."
+    podman rm ald-utils
+
+    pprint "Attempting to replace files atomically..."
+    exch "${ALD_PATH:?}/init.bak" "${ALD_PATH:?}/init/init.sh"
+    exch "${ALD_PATH:?}/exch.bak" "${ALD_PATH:?}/init/safe/exch"
+    exch "${ALD_PATH:?}/busybox.bak" "${ALD_PATH:?}/init/safe/busybox"
+    exch "${ALD_PATH:?}/ald.bak" "${ALD_PATH:?}/ald"
+    rm "${ALD_PATH:?}"/{ald.bak,init.bak,exch.bak,busybox.bak}
+
+    pprint "Self-update finished"
+}
+
 source "$(dirname "$(readlink "$0")")/ald-config.sh" || pprint "No config found, using defaults..."
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
@@ -264,6 +288,7 @@ declare -A -r RUN_CMD=(
     ["rm"]="ONK3quF6NgVfC"
     ["gc"]="fM2KhAo1Ko0Pk"
     ["init"]="YhOp7NCvu2blO"
+    ["self-update"]="QUd1eE2e8cEdn"
 )
 
 if [[ "$(id -u)" != "0" ]]; then
@@ -305,6 +330,9 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             ;;
         fM2KhAo1Ko0Pk)
             rm_deps
+            ;;
+        QUd1eE2e8cEdn)
+            update_ald
             ;;
         diff)
             show_updates "${2-}" "${3-}"
