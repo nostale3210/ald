@@ -100,7 +100,7 @@ build_image() {
 setup_dep() {
     shift
     if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
-    if [[ "$*" == "-"*"b"* || -f "${ALD_PATH:?}/Containerfile" ]]; then build_image && sleep 1 && SOURCE_IMAGE="$LOCAL_TAG"; fi
+    if [[ "$*" == "-"*"b"* ]]; then build_image && sleep 1 && SOURCE_IMAGE="$LOCAL_TAG"; fi
 
     pprint "Retrieving vars..."
     current_id="$(cat "${ALD_PATH:?}/current")"
@@ -232,14 +232,14 @@ rm_deps() {
 init_ald() {
     shift
 
-    mkdir -p "${ALD_PATH:?}"/{0,init/safe}
     echo "0" > "${ALD_PATH:?}/current"
     mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
-    mv "${ALD_PATH:?}"/{busybox,jexch} "$ALD_PATH/init/safe/"
+    mv "${ALD_PATH:?}"/{busybox,exch} "$ALD_PATH/init/safe/"
 
     if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
     setup_dep
+    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
 
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
