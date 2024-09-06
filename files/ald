@@ -229,6 +229,7 @@ init_ald() {
 
     ln -s "${ALD_PATH:?}/ald" /usr/bin/ald
     mkdir -p "${ALD_PATH:?}/init/safe"
+    mkdir -p /var/usrlocal
     echo "0" > "${ALD_PATH:?}/current"
     mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
     mv "${ALD_PATH:?}"/{busybox,exch} "$ALD_PATH/init/safe/"
