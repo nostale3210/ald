@@ -2,8 +2,8 @@
 
 if [ "$(ALD_PATH/init/safe/busybox cat ALD_PATH/current)" != "INSERT_DEPLOYMENT" ]; then
     ALD_PATH/init/safe/busybox mount -o remount,rw /
-    if ALD_PATH/init/safe/exch -e /usr ALD_PATH/INSERT_DEPLOYMENT/usr; then
-        ALD_PATH/init/safe/exch -e /etc ALD_PATH/INSERT_DEPLOYMENT/etc
+    if ALD_PATH/init/safe/exch /usr ALD_PATH/INSERT_DEPLOYMENT/usr; then
+        ALD_PATH/init/safe/exch /etc ALD_PATH/INSERT_DEPLOYMENT/etc
         ALD_PATH/init/safe/busybox mv ALD_PATH/INSERT_DEPLOYMENT ALD_PATH/"$(ALD_PATH/init/safe/busybox cat ALD_PATH/current)"
         ALD_PATH/init/safe/busybox echo "INSERT_DEPLOYMENT" > ALD_PATH/current
     fi

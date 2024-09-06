@@ -29,11 +29,10 @@ print_help() {
     printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
     printf "\tinit\t\tInitialise ALD on a system\n"
     printf "\t\t\tOptions:\n"
-    printf "\t\t\t\t-u\tPull newest image before initialising\n"
-    printf "\t\t\t\t\t(Same as \`ald pull\`)\n"
     printf "\t\t\t\t-b\tBuild the local Containerfile before initialising\n"
     printf "\t\t\t\t\tCurrently required for the local image to be used\n"
     printf "\t\t\t\t\t(Same as \`ald build\`)\n"
+    printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
 
     printf "\n"
     printf "\033[1mExamples:\033[0m\n"
@@ -128,14 +127,10 @@ setup_dep() {
     fi
     podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
     podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
-    podman cp ald-tmp:/etc/passwd- "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
-    podman cp ald-tmp:/etc/shadow- "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
 
     sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
     sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
-    sort /etc/passwd- "${ALD_PATH:?}/passwd-" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd-" || fail_ex "$next_id" "Couldn't place system config."
-    sort /etc/shadow- "${ALD_PATH:?}/shadow-" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow-" || fail_ex "$next_id" "Couldn't place system config."
-    rm "${ALD_PATH:?}"/{passwd,shadow,passwd-,shadow-} || fail_ex "$next_id" "Couldn't place system config."
+    rm "${ALD_PATH:?}"/{passwd,shadow} || fail_ex "$next_id" "Couldn't place system config."
 
     podman rm ald-tmp &>/dev/null || fail_ex "$next_id" "Couldn't remove temporary container."
 
@@ -197,9 +192,9 @@ swap_deployment() {
 reset_state() {
     pprint "Syncing absolutely required config..."
     cp -rfa --parents /etc/fstab /etc/crypttab /etc/locale.conf /etc/localtime /etc/adjtime \
-        /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid /etc/selinux/config \
-        /etc/selinux/targeted /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
-        /etc/firewalld /etc/polkit-1/rules.d /etc/environment /etc/hostname \
+        /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid \
+        /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
+        /etc/firewalld /etc/environment /etc/hostname \
         /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers \
         "${ALD_PATH:?}/$1/" || fail_ex "$1" "Resetting /etc failed."
 }
@@ -232,15 +227,16 @@ rm_deps() {
 init_ald() {
     shift
 
+    ln -s "${ALD_PATH:?}/ald" /usr/bin/ald
+    mkdir -p "${ALD_PATH:?}/init/safe"
     echo "0" > "${ALD_PATH:?}/current"
     mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
     mv "${ALD_PATH:?}"/{busybox,exch} "$ALD_PATH/init/safe/"
 
-    if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
     STATE="drop"
     setup_dep
-    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
+    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "1"; fi
 
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
