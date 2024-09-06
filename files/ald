@@ -1,0 +1,341 @@
+#!/usr/bin/env bash
+
+pprint() {
+    printf "\e[1F\e[2K%s\r\e[1E" "$1"
+}
+
+print_help() {
+    printf "\033[1m\033[4mALD\033[24m\tApply & manage container image based os deployments\033[0m\n\n"
+    printf "\033[1mUsage:\033[0m\tald SUBCOMMAND [OPTIONS]... [ARGUMENTS]...\n\n"
+    printf "\033[1mSubcommands:\033[0m\n"
+    printf "\thelp\t\tPrint this menu\n"
+    printf "\tstatus\t\tPrint active and available deployments and their versions\n"
+    printf "\tpull\t\tPull the newest version of the upstream container image, if a new version is available\n"
+    printf "\tbuild\t\tBuild a Containerfile in %s\n" "${ALD_PATH:?}"
+    printf "\tswap\t\tReplace the currently active deployment with another specified, available one\n"
+    printf "\trm\t\tRemove a specified, available deployment\n"
+    printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
+    printf "\tdep\t\tDeploy new versions\n"
+    printf "\t\t\tOptions:\n"
+    printf "\t\t\t\t-u\tPull newest image before deploying\n"
+    printf "\t\t\t\t\t(Same as \`ald pull\`)\n"
+    printf "\t\t\t\t-b\tBuild the local Containerfile before deploying\n"
+    printf "\t\t\t\t\tCurrently required for the local image to be used\n"
+    printf "\t\t\t\t\t(Same as \`ald build\`)\n"
+    printf "\t\t\t\t-s\tSwap to the new deployment immediately after building\n"
+    printf "\t\t\t\t\t(Same as \`ald swap DEPLOYMENT\`)\n"
+    printf "\t\t\t\t-g\tTrigger gc after deploying\n"
+    printf "\t\t\t\t\t(Same as \`ald gc\`)\n"
+    printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
+    printf "\tinit\t\tInitialise ALD on a system\n"
+    printf "\t\t\tOptions:\n"
+    printf "\t\t\t\t-u\tPull newest image before initialising\n"
+    printf "\t\t\t\t\t(Same as \`ald pull\`)\n"
+    printf "\t\t\t\t-b\tBuild the local Containerfile before initialising\n"
+    printf "\t\t\t\t\tCurrently required for the local image to be used\n"
+    printf "\t\t\t\t\t(Same as \`ald build\`)\n"
+
+    printf "\n"
+    printf "\033[1mExamples:\033[0m\n"
+    printf "\tald dep -ubs\t\tUpdate image, build Containerfile, switch to new deployment immediately\n"
+    printf "\tald dep\t\t\tCreate deployment, will be default on next boot\n"
+    printf "\tald swap 6\t\tSwap to deployment 6\n"
+    printf "\tald rm 4\t\tRemove deployment 4\n"
+}
+
+print_status() {
+    read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
+    depl_version="$(grep ^VERSION= < "/usr/lib/os-release" | cut -d'=' -f2)"
+    depl_name="$(grep ^NAME= < "/usr/lib/os-release" | cut -d'=' -f2)"
+    printf "\033[1mCurrently active deployment:\033[0m\n\n"
+    printf "\t\033[1m\033[4m%s\033[0m\t\u2500\u2500\u2500\tName: %s\n" "$(cat "${ALD_PATH:?}/current")" "$depl_name"
+    printf "\t\t\tVersion: %s\n" "$depl_version"
+    printf "\t\t\tKernel: \"%s\"\n\n\n" "$(find "/usr/lib/modules" -maxdepth 1 -type d | sort | tail -n1 | awk -F'/' '{ print $NF }')"
+    printf "\033[1mOther available deployments:\033[0m\n\n"
+    for depl in "${available_deployments[@]}"; do
+        depl_version="$(grep ^VERSION= < "${ALD_PATH:?}/$depl/usr/lib/os-release" | cut -d'=' -f2)"
+        depl_name="$(grep ^NAME= < "${ALD_PATH:?}/$depl/usr/lib/os-release" | cut -d'=' -f2)"
+        printf "\t\033[1m%s\033[0m\t\u2500\u2500\u2500\tName: %s\n" "$depl" "$depl_name"
+        printf "\t\t\tVersion: %s\n" "$depl_version"
+        printf "\t\t\tKernel: \"%s\"\n\n" "$(find "${ALD_PATH:?}/$depl/usr/lib/modules" -maxdepth 1 -type d | sort | tail -n1 | awk -F'/' '{ print $NF }')"
+    done
+}
+
+fail_ex() {
+    printf "\n\033[31;1mCritical Failure!\033[0m\n%s\n\n" "$2"
+    if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
+        pprint "Attempting cleanup..."
+        podman rm ald-tmp &>/dev/null
+        rm -rf "${ALD_PATH:?}/$1"
+        rm -rf "${ALD_PATH:?}/init/$1.sh"
+        rm -rf "${BOOT_PATH:?}/$1"
+        rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf"
+    fi
+    mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
+    exit 1
+}
+
+pull_image() {
+    pprint "Checking for updates..."
+    installed_image="$(podman inspect --format '{{.Created}}' "$SOURCE_IMAGE" 2>/dev/null)"
+    remote_image="$(skopeo inspect --format '{{.Created}}' "docker://$SOURCE_IMAGE" 2>/dev/null)"
+    if [[ "$installed_image" != "$remote_image" ]]; then
+        pprint "Pulling $SOURCE_IMAGE..."
+        if [[ "$tput_support" == "y" ]]; then tput smcup; fi
+        podman pull "$SOURCE_IMAGE"
+        if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
+    else
+        printf "Latest image already pulled. To create a new deployment anyways omit \"-u\".\n"
+        exit 0
+    fi
+}
+
+build_image() {
+    pprint "Building local image..."
+    if [[ "$tput_support" == "y" ]]; then tput smcup; fi
+    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}"
+    if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
+}
+
+setup_dep() {
+    shift
+    if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
+    if [[ "$*" == "-"*"b"* || -f "${ALD_PATH:?}/Containerfile" ]]; then build_image && sleep 1 && SOURCE_IMAGE="$LOCAL_TAG"; fi
+
+    pprint "Retrieving vars..."
+    current_id="$(cat "${ALD_PATH:?}/current")"
+    max_id="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
+    max_id="$(echo "$current_id" "$max_id" | tr " " "\n" | sort -n | tail -n1)"
+    next_id="$((max_id+1))"
+
+    pprint "Creating directories..."
+    mkdir -p "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment root."
+    mkdir -p "${ALD_PATH:?}/init" || fail_ex "$next_id" "Couldn't create init directory."
+    mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
+
+    pprint "Syncing image root to fs..."
+    podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-tmp:/usr "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
+    podman cp ald-tmp:/usr/etc "${ALD_PATH:?}/$next_id/etc" &>/dev/null
+    podman cp ald-tmp:/etc "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
+    ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
+
+    pprint "Syncing system configuration..."
+    if [[ "$STATE" == "drop" ]]; then
+        reset_state "$next_id"
+    else
+        rsync -aclHhx /etc "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place system config."
+    fi
+    podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+    podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+    podman cp ald-tmp:/etc/passwd- "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+    podman cp ald-tmp:/etc/shadow- "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+
+    sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/passwd- "${ALD_PATH:?}/passwd-" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd-" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/shadow- "${ALD_PATH:?}/shadow-" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow-" || fail_ex "$next_id" "Couldn't place system config."
+    rm "${ALD_PATH:?}"/{passwd,shadow,passwd-,shadow-} || fail_ex "$next_id" "Couldn't place system config."
+
+    podman rm ald-tmp &>/dev/null || fail_ex "$next_id" "Couldn't remove temporary container."
+
+    pprint "Preparing boot entry..."
+    new_kernel="$(find "${ALD_PATH:?}/$next_id/usr/lib/modules" -name vmlinuz | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new kernel."
+    new_init="$(find "${ALD_PATH:?}/$next_id/usr/lib/modules" -name initramfs.img | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new initramfs."
+    cp -rfa "$new_kernel" "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place new kernel."
+    cp -rfa "$new_init" "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place new initramfs."
+    cp -rfa "${ALD_PATH:?}$BOOT_PATH.conf" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Couldn't place boot config."
+    cp -rfa "${ALD_PATH:?}/init/init.sh" "$ALD_PATH/init/$next_id.sh" || fail_ex "$next_id" "Couldn't place init script."
+    chmod +x "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Couldn't place init script."
+
+    sed -i "s@INSERT_DEPLOYMENT@$next_id@g" "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Placing template files for $ID failed."
+    sed -i "s@ALD_PATH@$ALD_PATH@g" "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Placing template files for $ID failed."
+    sed -i "s@INSERT_DEPLOYMENT@$next_id@g" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Placing template files for $ID failed."
+    sed -i "s@ALD_PATH@$ALD_PATH@g" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Placing template files for $ID failed."
+
+    pprint "Deployment $next_id installed!"
+
+    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
+    if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
+    if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
+}
+
+show_updates() {
+    rpm --version &>/dev/null || fail_ex "-1" "Currently only rpm-based systems are supported."
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* && "$1" != "$(cat "${ALD_PATH:?}"/current)" ]]; then
+        fail_ex "-1" "No such deployment: $1."
+    elif [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$2"* && "$2" != "$(cat "${ALD_PATH:?}"/current)" ]]; then
+        fail_ex "-1" "No such deployment: $2."
+    fi
+    FALLBACK="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
+    if [[ -n "$1" && "$1" != "$(cat "${ALD_PATH:?}/current")" ]]; then OLD_DEP="${ALD_PATH:?}/$1"; else OLD_DEP="${ALD_PATH:?}/$FALLBACK"; fi
+    if [[ -n "$2" && "$2" != "$(cat "${ALD_PATH:?}/current")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
+    printf "Comparing %s and %s:\n" "$OLD_DEP" "$NEW_DEP"
+    rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || (rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP.")
+    rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || (rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP.")
+    diff -y "$HOME/.old" "$HOME/.new" | grep "|" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
+    rm "$HOME/"{.old,.new} || printf "Failed to delete temporary files.\n"
+}
+
+swap_deployment() {
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
+        fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
+    fi
+    printf "Replacing deployment %s with %s.\n" "$(cat "${ALD_PATH:?}/current")" "$1"
+    (mountpoint /usr &>/dev/null && umount -l /usr) || fail_ex "-1" "Couldn't temporarily remove /usr bind mount."
+    exch /usr "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
+    exch /etc "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
+    mount -o bind,ro /usr /usr || printf "Restoring /usr bind mount failed, fs is rw."
+    mv "${ALD_PATH:?}/$1" "$ALD_PATH/$(cat "$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
+    echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
+    systemctl daemon-reexec || printf "Couldn't reexec systemd, system might behave weirdly."
+    for user in $(users | awk '{ print $1 }'); do
+        sudo -u "$user" env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$user")"/bus systemctl --user daemon-reexec || printf "Couldn't reexec systemd, system might behave weirdly."
+    done
+}
+
+reset_state() {
+    pprint "Syncing absolutely required config..."
+    cp -rfa --parents /etc/fstab /etc/crypttab /etc/locale.conf /etc/localtime /etc/adjtime \
+        /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid /etc/selinux/config \
+        /etc/selinux/targeted /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
+        /etc/firewalld /etc/polkit-1/rules.d /etc/environment /etc/hostname \
+        /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers \
+        "${ALD_PATH:?}/$1/" || fail_ex "$1" "Resetting /etc failed."
+}
+
+apply_selinux_policy() {
+    pprint "Relabeling deployment $1..."
+    restorecon -RF "${BOOT_PATH:?}"
+    setfiles -r "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$1/etc/selinux/targeted/contexts/files/file_contexts" "${ALD_PATH:?}/$1" &>/dev/null
+}
+
+rm_dep() {
+    pprint "Removing deployment $1..."
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
+        fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
+    fi
+    podman rm ald-tmp &>/dev/null
+    rm -rf "${ALD_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/$1"
+    rm -rf "${ALD_PATH:?}/init/$1.sh" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/init/$1.sh" 
+    rm -rf "${BOOT_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/$1"
+    rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/loader/entries/$1.conf"
+    mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
+}
+
+rm_deps() {
+    while [[ "$(find /var/deployments -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -nr | wc -l)" -gt "$((KEEP_DEPS-1))" ]]; do
+        rm_dep "$(find /var/deployments -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | head -n1)"
+    done
+}
+
+init_ald() {
+    shift
+
+    mkdir -p "${ALD_PATH:?}"/{0,init/safe}
+    echo "0" > "${ALD_PATH:?}/current"
+    mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
+    mv "${ALD_PATH:?}"/{busybox,jexch} "$ALD_PATH/init/safe/"
+
+    if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
+    if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
+    setup_dep
+
+    pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
+}
+
+source "$(dirname "$(readlink "$0")")/ald-config.sh" || pprint "No config found, using defaults..."
+
+SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
+LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
+ALD_PATH="${ALD_PATH:-/var/deployments}"
+BOOT_PATH="${BOOT_PATH:-/boot}"
+STATE="${ALD_STATE:-keep}"
+KEEP_DEPS="${KEEP_DEPS:-4}"
+
+if (infocmp 2>/dev/null | grep -q smcup) &&
+    (infocmp 2>/dev/null | grep -q rmcup);
+then tput_support="y";
+else tput_support="n"; fi
+
+declare -A -r RUN_CMD=(
+    ["build"]="lwPOgI3J0zn6q"
+    ["pull"]="SPRjLFOXJvXt7"
+    ["swap"]="NJsoQnUMHEfpe"
+    ["dep"]="nQ8tKSuA0SJoy"
+    ["rm"]="ONK3quF6NgVfC"
+    ["gc"]="fM2KhAo1Ko0Pk"
+    ["init"]="YhOp7NCvu2blO"
+)
+
+if [[ "$(id -u)" != "0" ]]; then
+    case "$1" in
+        help)
+            print_help
+            ;;
+        status)
+            print_status
+            ;;
+        diff)
+            show_updates "${2-}" "${3-}"
+            ;;
+        *)
+            printf "\033[31;1mThis program needs to be ran as root.\nMore info:\033[0m\n\n"
+            print_help
+            exit 1
+            ;;
+    esac
+elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
+    case "$1" in
+        lwPOgI3J0zn6q)
+            build_image
+            ;;
+        SPRjLFOXJvXt7)
+            pull_image
+            ;;
+        NJsoQnUMHEfpe)
+            swap_deployment "$2"
+            ;;
+        nQ8tKSuA0SJoy)
+            setup_dep "$@"
+            ;;
+        ONK3quF6NgVfC)
+            rm_dep "$2"
+            ;;
+        YhOp7NCvu2blO)
+            init_ald "$@"
+            ;;
+        fM2KhAo1Ko0Pk)
+            rm_deps
+            ;;
+        diff)
+            show_updates "${2-}" "${3-}"
+            ;;
+        status)
+            print_status
+            ;;
+        help)
+            print_help
+            ;;
+        *)
+            printf "\033[31;1mUnrecognized command.\nMore info:\033[0m\n\n"
+            print_help
+            ;;
+    esac
+fi
+
+if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
+
+(systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running."
+
+printf "\n"
+
+for possible_cmd in "${!RUN_CMD[@]}"; do
+    if [[ "$1" == "$possible_cmd" ]]; then
+        shift
+        set -e
+        systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
+            ald "${RUN_CMD[$possible_cmd]}" "$@"
+        exit 0
+    fi
+done
