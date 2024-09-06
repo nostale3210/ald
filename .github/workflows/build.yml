@@ -1,0 +1,94 @@
+name: build-ald-utils
+on:
+  pull_request:
+  schedule:
+    - cron: '0 0 * * 0'
+  push:
+      branches:
+        - "main"
+  workflow_dispatch:
+
+env:
+    IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build-and-push:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    permissions: 
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+
+    steps: 
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Gather environment variables
+        shell: bash
+        run: |
+          echo "IMAGE_NAME=ald-utils" >> $GITHUB_ENV
+
+      - name: Image Metadata
+        uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: |
+            ${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.title=ald-utils
+            org.opencontainers.image.description=ald-utils
+            org.opencontainers.image.version=main
+
+      - name: Generate tags
+        id: generate-tags
+        shell: bash
+        run: |
+          SRC="${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}"
+          TAGS=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TAGS+="${SRC}:pr-${{ github.event.number }}"
+          else
+            TAGS+=",${SRC}:$(date +%Y%m%d)"
+            TAGS+=",${SRC}:latest"
+          fi
+          echo "Publishing with the following tags: "
+          echo "${TAGS}"
+          
+          echo "TAGS=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Image
+        id: build_image
+        uses: docker/build-push-action@v6
+        with:
+          file: ./Containerfile
+          push: true
+          tags: ${{ steps.generate-tags.outputs.TAGS }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,compression=zstd,compression-level=19,force-compression=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: sigstore/cosign-installer@v3.6.0
+        if: github.event_name != 'pull_request'
+
+      - name: Sign container image
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: false
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+        run: |
+          cosign sign -y --recursive --key env://COSIGN_PRIVATE_KEY ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build_image.outputs.digest }}
