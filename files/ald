@@ -238,6 +238,7 @@ init_ald() {
 
     if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
+    STATE="drop"
     setup_dep
     if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
 
