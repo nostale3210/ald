@@ -66,10 +66,10 @@ fail_ex() {
     if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
         pprint "Attempting cleanup..."
         podman rm ald-tmp &>/dev/null
-        rm -rf "${ALD_PATH:?}/$1"
-        rm -rf "${ALD_PATH:?}/init/$1.sh"
-        rm -rf "${BOOT_PATH:?}/$1"
-        rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf"
+        rm -rf "${ALD_PATH:?}/${1:?}"
+        rm -rf "${ALD_PATH:?}/init/${1:?}.sh"
+        rm -rf "${BOOT_PATH:?}/${1:?}"
+        rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
     fi
     mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
     exit 1
@@ -249,18 +249,18 @@ update_ald() {
     pull_image
 
     pprint "Retrieving updated files..."
-    podman create --name ald-utils "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
-    podman cp ald-utils:/ald/ald "${ALD_PATH:?}/ald.bak" || fail_ex "$next_id" "Couldn't sync files."
-    podman cp ald-utils:/ald/init.sh "${ALD_PATH:?}/init.bak" || fail_ex "$next_id" "Couldn't sync files."
-    podman cp ald-utils:/ald/exch "${ALD_PATH:?}/exch.bak" || fail_ex "$next_id" "Couldn't sync files."
-    podman cp ald-utils:/ald/busybox "${ALD_PATH:?}/busybox.bak" || fail_ex "$next_id" "Couldn't sync files."
+    podman create --name ald-utils "$SOURCE_IMAGE" &>/dev/null || fail_ex "-1" "Couldn't sync files."
+    podman cp ald-utils:/ald/ald "${ALD_PATH:?}/ald.bak" || fail_ex "-1" "Couldn't sync files."
+    podman cp ald-utils:/ald/init.sh "${ALD_PATH:?}/init.bak" || fail_ex "-1" "Couldn't sync files."
+    podman cp ald-utils:/ald/exch "${ALD_PATH:?}/exch.bak" || fail_ex "-1" "Couldn't sync files."
+    podman cp ald-utils:/ald/busybox "${ALD_PATH:?}/busybox.bak" || fail_ex "-1" "Couldn't sync files."
     podman rm ald-utils
 
     pprint "Attempting to replace files atomically..."
-    exch "${ALD_PATH:?}/init.bak" "${ALD_PATH:?}/init/init.sh"
-    exch "${ALD_PATH:?}/exch.bak" "${ALD_PATH:?}/init/safe/exch"
-    exch "${ALD_PATH:?}/busybox.bak" "${ALD_PATH:?}/init/safe/busybox"
-    exch "${ALD_PATH:?}/ald.bak" "${ALD_PATH:?}/ald"
+    exch "${ALD_PATH:?}/init.bak" "${ALD_PATH:?}/init/init.sh" || printf "init.sh couldn't be updated"
+    exch "${ALD_PATH:?}/exch.bak" "${ALD_PATH:?}/init/safe/exch" || printf "exch couldn't be updated"
+    exch "${ALD_PATH:?}/busybox.bak" "${ALD_PATH:?}/init/safe/busybox" || printf "busybox couldn't be updated"
+    exch "${ALD_PATH:?}/ald.bak" "${ALD_PATH:?}/ald" || printf "ald couldn't be updated"
     rm "${ALD_PATH:?}"/{ald.bak,init.bak,exch.bak,busybox.bak}
 
     pprint "Self-update finished"
