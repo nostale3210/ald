@@ -25,4 +25,6 @@ RUN dnf install -y busybox && \
 COPY files/ /ald
 
 RUN chmod +x /ald/ald && \
+    /ald/exch --version && \
+    /ald/busybox --help && \
     ls -la /ald
