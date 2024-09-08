@@ -16,6 +16,7 @@ print_help() {
     printf "\trm\t\tRemove a specified, available deployment\n"
     printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
     printf "\tself-update\tUpdate ALD and static binaries\n"
+
     printf "\tdep\t\tDeploy new versions\n"
     printf "\t\t\tOptions:\n"
     printf "\t\t\t\t-u\tPull newest image before deploying\n"
@@ -28,6 +29,7 @@ print_help() {
     printf "\t\t\t\t-g\tTrigger gc after deploying\n"
     printf "\t\t\t\t\t(Same as \`ald gc\`)\n"
     printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
+
     printf "\tinit\t\tInitialise ALD on a system\n"
     printf "\t\t\tOptions:\n"
     printf "\t\t\t\t-b\tBuild the local Containerfile before initialising\n"
@@ -35,6 +37,10 @@ print_help() {
     printf "\t\t\t\t\t(Same as \`ald build\`)\n"
     printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
     printf "\t\t\t\t--ex\tUse a customised %s,\n\t\t\t\t\tit will be used instead of an automatically generated entry\n" "${ALD_PATH:?}/boot.conf.ex"
+
+    printf "\tbootloader_update\tUpdate the system's bootloader\n"
+    printf "\t\t\tOptions (one is required):\n"
+    printf "\t\t\t\t--fg\tUpdate grub on fedora x86_64 systems"
 
     printf "\n"
     printf "\033[1mExamples:\033[0m\n"
@@ -278,12 +284,79 @@ update_ald() {
     pprint "Self-update finished"
 }
 
+update_bootloader() {
+    if [[ "$*" == *"--fg"* ]]; then
+        fedora_grub
+    else
+        printf "No bootloader seems to be available for this configuration."
+    fi
+}
+
+fedora_grub() {
+    podman run -ti --name ald-boot "$SOURCE_IMAGE" << "    EOF"
+        mkdir -p /boot/efi/EFI
+        (((dnf reinstall -y grub2-efi-x64.x86_64 ||
+            dnf install -y grub2-efi-x64.x86_64) ||
+            dnf5 reinstall -y grub2-efi-x64.x86_64) ||
+            dnf5 install -y grub2-efi-x64.x86_64) ||
+            (echo "Couldn't install grub!" && exit 1)
+        (((dnf reinstall -y shim-x64.x86_64 ||
+            dnf install -y shim-x64.x86_64) ||
+            dnf5 reinstall -y shim-x64.x86_64) ||
+            dnf5 install -y shim-x64.x86_64) ||
+            (echo "Couldn't install shim!" && exit 1)
+        exit 0
+    EOF
+
+    if [[ "$?" != "0" ]]; then fail_ex "-1" "Failed to fetch bootloader components."; fi
+    podman cp ald-boot:/boot/efi/EFI/fedora/shimx64.efi "${EFI_PATH:?}" ||
+        fail_ex "-1" "Failed to retrieve bootloader components."
+    podman cp ald-boot:/boot/efi/EFI/fedora/grubx64.efi "${EFI_PATH:?}" ||
+        fail_ex "-1" "Failed to retrieve bootloader components."
+    podman cp ald-boot:/boot/efi/EFI/fedora/mmx64.efi "${EFI_PATH:?}" ||
+        fail_ex "-1" "Failed to retrieve bootloader components."
+    podman cp ald-boot:/boot/efi/EFI/fedora/BOOTX64.CSV "${EFI_PATH:?}" ||
+        fail_ex "-1" "Failed to retrieve bootloader components."
+    podman cp ald-boot:/boot/efi/EFI/BOOT/fbx64.efi "${EFI_PATH:?}" ||
+        fail_ex "-1" "Failed to retrieve bootloader components."
+
+    pprint "Updating shim..."
+    cp "${EFI_PATH:?}/shimx64.efi" "${EFI_PATH:?}/shimx64.efi.bak" ||
+        fail_ex "-1" "Failed to prepare bootloader components."
+    cp "${EFI_PATH:?}/shimx64.efi" "${EFI_PATH:?}/shimx64.efi.bak.bak" ||
+        fail_ex "-1" "Failed to prepare bootloader components."
+    exch "${EFI_PATH:?}/shimx64.efi" "${EFI_PATH:?}/EFI/BOOT/BOOTX64.EFI" ||
+        fail_ex "-1" "Failed to place bootloader components."
+    exch "${EFI_PATH:?}/shimx64.efi.bak" "${EFI_PATH:?}/EFI/fedora/shim.efi" ||
+        printf "Failed to place bootloader components.\n"
+    exch "${EFI_PATH:?}/shimx64.efi.bak.bak" "${EFI_PATH:?}/EFI/fedora/shimx64.efi" ||
+        printf "Failed to place bootloader components.\n"
+    rm "${EFI_PATH:?}"/{shimx64.efi,shimx64.efi.bak,shimx64.efi.bak.bak} ||
+        printf "Failed to cleanup bootloader components.\n"
+
+    pprint "Updating grub..."
+    exch "${EFI_PATH:?}/grubx64.efi" "${EFI_PATH:?}/EFI/fedora/grubx64.efi" ||
+        printf "Failed to place bootloader components.\n"
+    exch "${EFI_PATH:?}/mmx64.efi" "${EFI_PATH:?}/EFI/fedora/mmx64.efi" ||
+        printf "Failed to place bootloader components.\n"
+    exch "${EFI_PATH:?}/BOOTX64.CSV" "${EFI_PATH:?}/EFI/fedora/BOOTX64.CSV" ||
+        printf "Failed to place bootloader components.\n"
+    exch "${EFI_PATH:?}/fbx64.efi" "${EFI_PATH:?}/EFI/BOOT/fbx64.efi" ||
+        printf "Failed to place bootloader components.\n"
+    rm "${EFI_PATH:?}"/{grubx64.efi,mmx64.efi,BOOTX64.CSV,fbx64.efi} ||
+        printf "Failed to cleanup bootloader components.\n"
+
+    podman rm ald-boot || printf "Failed to remove container ald-boot.\n"
+    printf "Update complete!\n"
+}
+
 source "$(dirname "$(readlink -f "$0")")/ald-config.sh" &>/dev/null || printf "No config found, using defaults...\n"
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
 ALD_PATH="${ALD_PATH:-/var/deployments}"
 BOOT_PATH="${BOOT_PATH:-/boot}"
+EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
 STATE="${ALD_STATE:-keep}"
 KEEP_DEPS="${KEEP_DEPS:-4}"
 
@@ -301,6 +374,7 @@ declare -A -r RUN_CMD=(
     ["gc"]="fM2KhAo1Ko0Pk"
     ["init"]="YhOp7NCvu2blO"
     ["self-update"]="QUd1eE2e8cEdn"
+    ["bootloader-update"]="QjPZu7VH36P6n"
 )
 
 if [[ "$(id -u)" != "0" ]]; then
@@ -345,6 +419,9 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             ;;
         QUd1eE2e8cEdn)
             update_ald
+            ;;
+        QjPZu7VH36P6n)
+            update_bootloader "$@"
             ;;
         diff)
             show_updates "${2-}" "${3-}"

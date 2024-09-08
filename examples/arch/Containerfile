@@ -1,0 +1,15 @@
+FROM docker.io/library/archlinux:latest
+
+COPY packages /
+COPY add_conf.conf /etc/dracut.conf.d/
+
+RUN pacman -Syyu --noconfirm
+
+RUN readarray packages < /packages && \
+    pacman -Syy --noconfirm ${packages[*]} --assume-installed mkinitcpio=4.20
+
+RUN pacman -Syy --noconfirm nvidia libva-nvidia-driver
+
+RUN KVER="$(find /usr/lib/modules -maxdepth 1 -type d | sort | tail -n1 | awk -F'/' '{ print $NF }')" && \
+    dracut --no-hostonly --kver "$KVER" --reproducible -v --add "tpm2-tss systemd-pcrphase" -f "/lib/modules/$KVER/initramfs.img" && \
+    chmod 0600 "/lib/modules/$KVER/initramfs.img"
