@@ -278,7 +278,7 @@ update_ald() {
     pprint "Self-update finished"
 }
 
-source "$(dirname "$(readlink "$0")")/ald-config.sh" || pprint "No config found, using defaults..."
+source "$(dirname "$(readlink -f "$0")")/ald-config.sh" &>/dev/null || printf "No config found, using defaults...\n"
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
