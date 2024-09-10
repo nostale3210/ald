@@ -89,8 +89,8 @@ fail_ex() {
 
 pull_image() {
     pprint "Checking for updates..."
-    installed_image="$(podman inspect --format '{{.Created}}' "$SOURCE_IMAGE" 2>/dev/null)"
-    remote_image="$(skopeo inspect --format '{{.Created}}' "docker://$SOURCE_IMAGE" 2>/dev/null)"
+    installed_image="$(podman inspect --format '{{.Digest}}' "$SOURCE_IMAGE" 2>/dev/null)"
+    remote_image="$(skopeo inspect --format '{{.Digest}}' "docker://$SOURCE_IMAGE" 2>/dev/null)"
     if [[ "$installed_image" == "$remote_image" ]]; then
         printf "Latest image already pulled.\nIf the invoked command was \`ald dep\` omit \"-u\" to create a new deployment anyways.\n"
         exit 0
@@ -220,6 +220,7 @@ apply_selinux_policy() {
 }
 
 deduplicate_deployments() {
+    pprint "Deduplicating inactive deployments..."
     if ! duperemove --version &>/dev/null; then fail_ex "-1" "Duperemove not found."; fi
 
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | tr "\n" " ")"

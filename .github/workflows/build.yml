@@ -76,8 +76,8 @@ jobs:
             podman push "localhost/ald-utils" "${{ env.PR_TAG }}" \
               --compression-format=zstd:chunked --tls-verify=true || FAILED+=("PR")
             if [[ "${{ github.event_name }}" == "pull_request" && "${FAILED[*]}" == *"PR"* ]]; then
-              echo "PR failed!" && exit 1
-            else exit 0; fi
+              echo "PR failed!" && return 1
+            else return 0; fi
           }
 
           push_tag() {
@@ -87,10 +87,10 @@ jobs:
               --compression-format=zstd:chunked --tls-verify=true \
               --sign-by-sigstore-private-key=/tmp/certs/SIGNING_SECRET.key || FAILED+=("$TAG")
             if [[ "${FAILED[*]}" == *"DATE"* && "${{ github.event_name }}" != "pull_request" ]]; then
-              echo "Pushing "${TAGS[$TAG]}" failed!" && exit 1
+              echo "Pushing "${TAGS[$TAG]}" failed!" && return 1
             elif [[ -n "${{ env.LATEST_TAG }}" && "${FAILED[*]}" == *"LATEST"* ]]; then
-              echo "Pushing "${TAGS[$TAG]}" failed!" && exit 1
-            else echo ""${TAGS[$TAG]}" pushed successfully!" && exit 0; fi
+              echo "Pushing "${TAGS[$TAG]}" failed!" && return 1
+            else echo ""${TAGS[$TAG]}" pushed successfully!" && return 0; fi
           }
 
           declare -A -r TAGS=(
@@ -100,6 +100,10 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then push_pr;
           else
             for TAG in "${!TAGS[@]}"; do
-              (push_tag "$TAG" || (sleep 15 && push_tag "$TAG")) || (sleep 15 && push_tag "$TAG")
+              for try in {1..3}; do
+                if push_tag "$TAG"; then break; fi
+                echo "Try $try out of 3 failed!"
+                sleep 15
+              done
             done
           fi
