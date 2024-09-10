@@ -14,7 +14,7 @@ env:
 jobs:
   build-and-push:
     name: Build and push image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions: 
       contents: read
       packages: write
@@ -26,69 +26,80 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Enable sigstore
+        shell: bash
+        run: |
+          sudo mkdir -p /etc/containers/registries.d
+          sudo touch /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
+          echo "docker:" | sudo tee /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
+          echo "  ${{ env.IMAGE_REGISTRY }}:" | sudo tee -a /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
+          echo "    use-sigstore-attachments: true" | sudo tee -a /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
 
       - name: Gather environment variables
         shell: bash
         run: |
           echo "IMAGE_NAME=ald-utils" >> $GITHUB_ENV
 
-      - name: Image Metadata
-        uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: |
-            ${{ env.IMAGE_NAME }}
-          labels: |
-            org.opencontainers.image.title=ald-utils
-            org.opencontainers.image.description=ald-utils
-            org.opencontainers.image.version=main
-
       - name: Generate tags
         id: generate-tags
         shell: bash
         run: |
           SRC="${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}"
-          TAGS=""
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            TAGS+="${SRC}:pr-${{ github.event.number }}"
+            echo "PR_TAG=${SRC}:pr-${{ github.event.number }}" >> $GITHUB_ENV
           else
-            TAGS+=",${SRC}:$(date +%Y%m%d)"
-            TAGS+=",${SRC}:latest"
+            echo "DATE_TAG=${SRC}:$(date +%Y%m%d)" >> $GITHUB_ENV
+            echo "LATEST_TAG=${SRC}:latest" >> $GITHUB_ENV
           fi
-          echo "Publishing with the following tags: "
-          echo "${TAGS}"
-          
-          echo "TAGS=${TAGS}" >> $GITHUB_OUTPUT
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        if: github.event_name != 'pull_request'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Image
-        id: build_image
-        uses: docker/build-push-action@v6
-        with:
-          file: ./Containerfile
-          push: true
-          tags: ${{ steps.generate-tags.outputs.TAGS }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,compression=zstd,compression-level=19,force-compression=true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - uses: sigstore/cosign-installer@v3.6.0
-        if: github.event_name != 'pull_request'
-
-      - name: Sign container image
-        if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: false
-          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+      - name: Retrieve keys
         run: |
-          cosign sign -y --recursive --key env://COSIGN_PRIVATE_KEY ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build_image.outputs.digest }}
+          mkdir -p /tmp/certs || echo "dir exists"
+          echo "${{ secrets.SIGNING_SECRET }}" > /tmp/certs/SIGNING_SECRET.key
+
+      - name: Build image
+        shell: bash
+        run: |
+          podman build --label=org.opencontainers.image.title=ald-utils \
+            --label=org.opencontainers.image.description=ald-utils \
+            --label=org.opencontainers.image.version=main \
+            --pull=newer --tag="localhost/ald-utils" \
+            -f ./Containerfile
+
+      - name: Push image
+        shell: bash
+        run: |
+          podman login --username="${{ github.actor }}" --password="${{ secrets.GITHUB_TOKEN }}" ghcr.io
+
+          push_pr() {
+            FAILED=()
+            podman push "localhost/ald-utils" "${{ env.PR_TAG }}" \
+              --compression-format=zstd:chunked --tls-verify=true || FAILED+=("PR")
+            if [[ "${{ github.event_name }}" == "pull_request" && "${FAILED[*]}" == *"PR"* ]]; then
+              echo "PR failed!" && exit 1
+            else exit 0; fi
+          }
+
+          push_tag() {
+            TAG="$1"
+            FAILED=()
+            podman push "localhost/ald-utils" "${TAGS[$TAG]}" \
+              --compression-format=zstd:chunked --tls-verify=true \
+              --sign-by-sigstore-private-key=/tmp/certs/SIGNING_SECRET.key || FAILED+=("$TAG")
+            if [[ "${FAILED[*]}" == *"DATE"* && "${{ github.event_name }}" != "pull_request" ]]; then
+              echo "Pushing "${TAGS[$TAG]}" failed!" && exit 1
+            elif [[ -n "${{ env.LATEST_TAG }}" && "${FAILED[*]}" == *"LATEST"* ]]; then
+              echo "Pushing "${TAGS[$TAG]}" failed!" && exit 1
+            else echo ""${TAGS[$TAG]}" pushed successfully!" && exit 0; fi
+          }
+
+          declare -A -r TAGS=(
+            ["DATE"]="${{ env.DATE_TAG }}"
+            ["LATEST"]="${{ env.LATEST_TAG }}"
+          )
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then push_pr;
+          else
+            for TAG in "${!TAGS[@]}"; do
+              (push_tag "$TAG" || (sleep 15 && push_tag "$TAG")) || (sleep 15 && push_tag "$TAG")
+            done
+          fi
