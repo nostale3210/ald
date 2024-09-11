@@ -1,7 +1,57 @@
 #!/usr/bin/env bash
 
 pprint() {
-    printf "\e[1F\e[2K%s\r\e[1E" "$1"
+    echo "$1" > "$locsync"
+}
+
+trap clean_draw 0
+
+clean_draw() {
+    echo "" > "$locsync"
+    sleep 0.2
+    kill -9 "$draw_pid"
+    wait "$draw_pid" &>/dev/null
+    rm "$locsync" &>/dev/null
+    printf "\e[?25h"
+}
+
+draw_bar() {
+    printf "\e[?25l"
+    local locsync="$1"
+    while true; do
+        while [[ -z "$(cat "$locsync")" ]]; do sleep 1; done
+        printf "[" && printf -- "-%.0s" $(seq 1 50) && printf "] %s\r" "$(cat "$locsync")"
+        sleep 0.1
+        for i in {1..10}; do
+            printf "[" && printf "=%.0s" $(seq 1 "$i") &&
+                printf -- "-%.0s" $(seq "$((i+1))" 50) && printf "] %s\r" "$(cat "$locsync")"
+            sleep 0.1
+        done
+        while [[ -n "$(cat "$locsync")" ]]; do
+            for i in {1..39}; do
+                printf "[" && printf -- "-%.0s" $(seq 1 "$i") &&
+                    printf "=%.0s" $(seq 1 10) && printf -- "-%.0s" $(seq "$((i+11))" 50) &&
+                    printf "] %s\r" "$(cat "$locsync")"
+                sleep 0.1
+                if [[ -z "$(cat "$locsync")" ]]; then break 2; fi
+            done
+            printf "[" && printf -- "-%.0s" $(seq 1 40) &&
+                printf "=%.0s" $(seq 1 10) && printf "] %s\r" "$(cat "$locsync")"
+            sleep 0.1
+            for i in {1..9}; do
+                printf "[" && printf "=%.0s" $(seq 1 "$i") &&
+                    printf -- "-%.0s" $(seq 10 49) &&
+                    printf "=%.0s" $(seq "$i" 9) && printf "] %s\r" "$(cat "$locsync")"
+                sleep 0.1
+                if [[ -z "$(cat "$locsync")" ]]; then break 2; fi
+            done
+            printf "[" && printf "=%.0s" $(seq 1 10) &&
+                printf -- "-%.0s" $(seq 1 40) && printf "] %s\r" "$(cat "$locsync")"
+            sleep 0.1
+        done
+        printf "\e[2K[" && printf "=%.0s" $(seq 1 50) && printf "] %s\r" "$(cat "$locsync")"
+        sleep 0.1
+    done
 }
 
 print_help() {
@@ -96,7 +146,7 @@ pull_image() {
         exit 0
     else
         pprint "Pulling $SOURCE_IMAGE..."
-        if [[ "$tput_support" == "y" ]]; then tput smcup; fi
+        if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
         podman pull "$SOURCE_IMAGE"
         if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
     fi
@@ -104,9 +154,9 @@ pull_image() {
 
 build_image() {
     pprint "Building local image..."
-    if [[ "$tput_support" == "y" ]]; then tput smcup; fi
+    if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
     podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}"
-    if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
+    if [[ "$tput_support" == "y" ]]; then echo "Finished building image..." > "$locsync" && tput rmcup; fi
 }
 
 setup_dep() {
@@ -190,7 +240,7 @@ swap_deployment() {
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
-    printf "Replacing deployment %s with %s.\n" "$(cat "${ALD_PATH:?}/current")" "$1"
+    pprint "Replacing deployment %s with %s.\n" "$(cat "${ALD_PATH:?}/current")" "$1"
     (mountpoint /usr &>/dev/null && umount -l /usr) || fail_ex "-1" "Couldn't temporarily remove /usr bind mount."
     exch /usr "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
     exch /etc "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
@@ -224,7 +274,7 @@ deduplicate_deployments() {
     if ! duperemove --version &>/dev/null; then fail_ex "-1" "Duperemove not found."; fi
 
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | tr "\n" " ")"
-    if [[ "$tput_support" == "y" ]]; then tput smcup; fi
+    if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
     duperemove -dhr --hashfile="${ALD_PATH:?}/.hashfile" "${available_deployments[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
 }
@@ -363,7 +413,7 @@ fedora_grub() {
         printf "Failed to cleanup bootloader components.\n"
 
     podman rm ald-boot || printf "Failed to remove container ald-boot.\n"
-    printf "Update complete!\n"
+    pprint "Update complete!\n"
 }
 
 source "$(dirname "$(readlink -f "$0")")/ald-config.sh" &>/dev/null || printf "No config found, using defaults...\n"
@@ -380,6 +430,11 @@ if (infocmp 2>/dev/null | grep -q smcup) &&
     (infocmp 2>/dev/null | grep -q rmcup);
 then tput_support="y";
 else tput_support="n"; fi
+
+locsync="/dev/shm/sync$$"
+echo "" > "$locsync"
+draw_bar "$locsync" &
+draw_pid="$!"
 
 declare -A -r RUN_CMD=(
     ["build"]="lwPOgI3J0zn6q"
