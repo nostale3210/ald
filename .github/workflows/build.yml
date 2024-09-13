@@ -102,7 +102,7 @@ jobs:
             for TAG in "${!TAGS[@]}"; do
               for try in {1..3}; do
                 if push_tag "$TAG"; then break; fi
-                echo "Try $try out of 3 failed!"
+                echo "Try $try out of 3 exhausted!"
                 sleep 15
               done
             done
