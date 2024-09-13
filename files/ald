@@ -121,6 +121,7 @@ fail_ex() {
     if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
         pprint "Attempting cleanup..."
         podman rm ald-tmp &>/dev/null
+        podman rm ald-utils &>/dev/null
         rm -rf "${ALD_PATH:?}/${1:?}"
         rm -rf "${ALD_PATH:?}/init/${1:?}.sh"
         rm -rf "${BOOT_PATH:?}/${1:?}"
@@ -140,7 +141,7 @@ pull_image() {
     else
         pprint "Pulling $SOURCE_IMAGE..."
         if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-        podman pull "$SOURCE_IMAGE"
+        podman pull "$SOURCE_IMAGE" || fail_ex "-1" "Pulling image failed."
         if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
     fi
 }
@@ -148,7 +149,7 @@ pull_image() {
 build_image() {
     pprint "Building local image..."
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}"
+    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}" || fail_ex "-1" "Building image failed."
     if [[ "$tput_support" == "y" ]]; then echo "Finished building image..." > "$locsync" && tput rmcup; fi
 }
 
@@ -207,9 +208,9 @@ setup_dep() {
     pprint "Deployment $next_id installed!"
 
     if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
+    if [[ "$*" == "-"*"d"* ]]; then deduplicate_deployments; fi
     if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
     if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
-    if [[ "$*" == "-"*"d"* ]]; then deduplicate_deployments; fi
 }
 
 show_updates() {
@@ -239,7 +240,7 @@ swap_deployment() {
     exch /usr "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
     exch /etc "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
     mount -o bind,ro /usr /usr || printf "Restoring /usr bind mount failed, fs is rw."
-    chattr +i / || fail_ex "-1" "Couldn't lock /."
+    chattr +i / || printf "Couldn't lock /.\n"
     mv "${ALD_PATH:?}/$1" "$ALD_PATH/$(cat "$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
     echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     systemctl daemon-reexec || printf "Couldn't reexec systemd, system might behave weirdly."
@@ -267,8 +268,10 @@ apply_selinux_policy() {
 deduplicate_deployments() {
     pprint "Deduplicating inactive deployments..."
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 2 -type d -name "*usr" -not -path "init*" | tr "\n" " ")"
+    read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
     hardlink -tXv -s1 "${available_deployments[@]}"
+    hardlink -tXv -s1 "${available_boot_files[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
 }
 
