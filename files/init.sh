@@ -9,6 +9,8 @@ if [ "$(ALD_PATH/init/safe/busybox cat ALD_PATH/current)" != "INSERT_DEPLOYMENT"
         ALD_PATH/init/safe/exch /etc ALD_PATH/INSERT_DEPLOYMENT/etc
         ALD_PATH/init/safe/busybox mv ALD_PATH/INSERT_DEPLOYMENT ALD_PATH/"$(ALD_PATH/init/safe/busybox cat ALD_PATH/current)"
         ALD_PATH/init/safe/busybox echo "INSERT_DEPLOYMENT" > ALD_PATH/current
+        ALD_PATH/init/safe/busybox mkdir -p /usr/lib
+        ALD_PATH/init/safe/busybox touch /usr/lib/os-release
     fi
 fi
 
