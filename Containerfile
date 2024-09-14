@@ -1,6 +1,7 @@
 FROM quay.io/fedora/fedora:latest
 
-RUN dnf install -y git-core glibc-static gettext gettext-devel autoconf flex bison libtool automake
+RUN dnf install -y git-core glibc-static gettext gettext-devel \
+        autoconf flex bison libtool automake wget
 
 RUN git clone git://git.kernel.org/pub/scm/utils/util-linux/util-linux.git && \
     cd util-linux && \
@@ -19,12 +20,24 @@ RUN cd util-linux && \
     make DESTDIR=/util-linux/out install-strip && \
     mv out/usr/bin/exch /ald
 
-RUN dnf install -y busybox && \
+RUN mkdir fclones && \
+    cd fclones && \
+    curl -s https://api.github.com/repos/pkolaczk/fclones/releases/latest \
+        | grep "browser_download_url.*-glibc-x86_64.tar.gz" \
+        | cut -d : -f 2,3 \
+        | tr -d \" \
+        | wget -qi - && \
+    tar -xf fclones*.tar.gz && \
+    cp usr/bin/fclones /ald
+
+RUN rm -rf util-linux fclones && \
+    dnf install -y busybox && \
     cp /usr/sbin/busybox /ald
 
 COPY files/ /ald
 
 RUN chmod +x /ald/ald && \
     /ald/exch --version && \
+    /ald/fclones --version && \
     /ald/busybox --help && \
     ls -la /ald

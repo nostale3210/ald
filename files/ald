@@ -270,8 +270,12 @@ deduplicate_deployments() {
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 2 -type d -name "*usr" -not -path "init*" | tr "\n" " ")"
     read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-    hardlink -tXv -s1 "${available_deployments[@]}"
-    hardlink -tXv -s1 "${available_boot_files[@]}"
+        "${ALD_PATH:?}/init/safe/fclones" group --hidden "${available_deployments[@]}" |
+            "${ALD_PATH:?}/init/safe/fclones" link ||
+            hardlink -tXv -s1 "${available_deployments[@]}"
+        "${ALD_PATH:?}/init/safe/fclones" group --hidden "${available_boot_files[@]}" |
+            "${ALD_PATH:?}/init/safe/fclones" link ||
+            hardlink -tXv -s1 "${available_boot_files[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
 }
 
@@ -302,7 +306,7 @@ init_ald() {
     mkdir -p /var/usrlocal
     echo "0" > "${ALD_PATH:?}/current"
     mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
-    mv "${ALD_PATH:?}"/{busybox,exch} "$ALD_PATH/init/safe/"
+    mv "${ALD_PATH:?}"/{busybox,exch,fclones} "$ALD_PATH/init/safe/"
     boot_conf="$(find "${BOOT_PATH:?}/loader/entries" | sort | tail -n1)"
     if [[ "$*" == *"--ex"* ]]; then
         mv -f "${ALD_PATH:?}/boot.conf.ex" "${ALD_PATH:?}/boot.conf"
@@ -333,15 +337,18 @@ update_ald() {
     podman cp ald-utils:/ald/ald "${ALD_PATH:?}/ald.bak" || fail_ex "-1" "Couldn't sync files."
     podman cp ald-utils:/ald/init.sh "${ALD_PATH:?}/init.bak" || fail_ex "-1" "Couldn't sync files."
     podman cp ald-utils:/ald/exch "${ALD_PATH:?}/exch.bak" || fail_ex "-1" "Couldn't sync files."
+    podman cp ald-utils:/ald/fclones "${ALD_PATH:?}/fclones.bak" || fail_ex "-1" "Couldn't sync files."
     podman cp ald-utils:/ald/busybox "${ALD_PATH:?}/busybox.bak" || fail_ex "-1" "Couldn't sync files."
-    podman rm ald-utils
+    podman rm ald-utils &>/dev/null
 
     pprint "Attempting to replace files atomically..."
+    touch "${ALD_PATH:?}/init/safe"/{exch,fclones,busybox} &>/dev/null || true
     exch "${ALD_PATH:?}/init.bak" "${ALD_PATH:?}/init/init.sh" || printf "init.sh couldn't be updated"
     exch "${ALD_PATH:?}/exch.bak" "${ALD_PATH:?}/init/safe/exch" || printf "exch couldn't be updated"
+    exch "${ALD_PATH:?}/fclones.bak" "${ALD_PATH:?}/init/safe/fclones" || printf "fclones couldn't be updated"
     exch "${ALD_PATH:?}/busybox.bak" "${ALD_PATH:?}/init/safe/busybox" || printf "busybox couldn't be updated"
     exch "${ALD_PATH:?}/ald.bak" "${ALD_PATH:?}/ald" || printf "ald couldn't be updated"
-    rm "${ALD_PATH:?}"/{ald.bak,init.bak,exch.bak,busybox.bak}
+    rm "${ALD_PATH:?}"/{ald.bak,init.bak,exch.bak,fclones.bak,busybox.bak}
 
     pprint "Self-update finished"
 }
