@@ -99,7 +99,7 @@ print_help() {
 }
 
 print_status() {
-    read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
+    read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
     depl_version="$(grep ^VERSION= < "/usr/lib/os-release" | cut -d'=' -f2)"
     depl_name="$(grep ^NAME= < "/usr/lib/os-release" | cut -d'=' -f2)"
     printf "\033[1mCurrently active deployment:\033[0m\n\n"
@@ -160,7 +160,7 @@ setup_dep() {
 
     pprint "Retrieving vars..."
     current_id="$(cat "${ALD_PATH:?}/current")"
-    max_id="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
+    max_id="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
     max_id="$(echo "$current_id" "$max_id" | tr " " "\n" | sort -n | tail -n1)"
     next_id="$((max_id+1))"
 
@@ -220,13 +220,13 @@ show_updates() {
     elif [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$2"* && "$2" != "$(cat "${ALD_PATH:?}"/current)" ]]; then
         fail_ex "-1" "No such deployment: $2."
     fi
-    FALLBACK="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
+    FALLBACK="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
     if [[ -n "$1" && "$1" != "$(cat "${ALD_PATH:?}/current")" ]]; then OLD_DEP="${ALD_PATH:?}/$1"; else OLD_DEP="${ALD_PATH:?}/$FALLBACK"; fi
     if [[ -n "$2" && "$2" != "$(cat "${ALD_PATH:?}/current")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
     printf "Comparing %s and %s:\n" "$OLD_DEP" "$NEW_DEP"
     rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || (rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP.")
     rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || (rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP.")
-    diff -y "$HOME/.old" "$HOME/.new" | grep "|" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
+    diff -y "$HOME/.old" "$HOME/.new" | grep "|\|>\|<" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
     rm "$HOME/"{.old,.new} || printf "Failed to delete temporary files.\n"
 }
 
@@ -267,7 +267,7 @@ apply_selinux_policy() {
 
 deduplicate_deployments() {
     pprint "Deduplicating inactive deployments..."
-    read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 2 -type d -name "*usr" -not -path "init*" | tr "\n" " ")"
+    read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 2 -type d -wholename "*[0-9]*/usr" | tr "\n" " ")"
     read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
         "${ALD_PATH:?}/init/safe/fclones" group -H -1 --hash-fn blake3 --hidden "${available_deployments[@]}" |
@@ -294,8 +294,8 @@ rm_dep() {
 }
 
 rm_deps() {
-    while [[ "$(find /var/deployments -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -nr | wc -l)" -gt "$((KEEP_DEPS-1))" ]]; do
-        rm_dep "$(find /var/deployments -maxdepth 1 -type d -not -path '*init*' | tail -n+2 | awk -F'/' '{print $NF}' | sort -n | head -n1)"
+    while [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | wc -l)" -gt "$((KEEP_DEPS-1))" ]]; do
+        rm_dep "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | head -n1)"
     done
 }
 
