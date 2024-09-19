@@ -16,6 +16,8 @@ fi
 
 mount -o bind,ro /usr /usr
 mount -o bind,rw /usr/local /usr/local
+ALD_PATH/init/safe/busybox find ALD_PATH -mindepth 2 -maxdepth 2 -type d -name "usr" \
+    -exec ALD_PATH/init/safe/busybox sh -c 'ALD_PATH/init/safe/busybox mountpoint {} &>/dev/null || ALD_PATH/init/safe/busybox mount -o bind,ro {} {}' \;
 ALD_PATH/init/safe/busybox chattr +i /
 
 exec /usr/sbin/init
