@@ -180,7 +180,7 @@ setup_dep() {
     podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
     MOUNTC="$(podman mount ald-tmp)"
     mkdir -p "${ALD_PATH:?}/image"
-    rsync -aHlux --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHlcx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "$MOUNTC"/usr/etc/ "${ALD_PATH:?}/image/etc/" &>/dev/null
     podman unmount ald-tmp &>/dev/null || printf "Temporary container still mounted!\n"
 
