@@ -64,6 +64,7 @@ jobs:
             --label=org.opencontainers.image.description=ald-utils \
             --label=org.opencontainers.image.version=main \
             --pull=newer --tag="localhost/ald-utils" \
+            --target="ald" \
             -f ./Containerfile
 
       - name: Push image

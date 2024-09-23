@@ -1,4 +1,4 @@
-FROM quay.io/fedora/fedora:latest
+FROM quay.io/fedora/fedora:latest as tmp
 
 RUN dnf install -y git-core glibc-static gettext gettext-devel \
         autoconf flex bison libtool automake wget
@@ -30,3 +30,8 @@ RUN chmod +x /ald/ald && \
     /ald/exch --version && \
     /ald/busybox --help && \
     ls -la /ald
+
+
+FROM docker.io/library/alpine:latest as ald
+
+COPY --from=tmp /ald /ald
