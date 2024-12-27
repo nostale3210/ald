@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 
+
 pprint() {
-    echo "$1" > "$locsync"
+    echo "$1"  > "$locsync"
 }
+
 
 trap clean_draw 0
 
+
 clean_draw() {
-    echo "" > "$locsync"
+    echo ""  > "$locsync"
     sleep 0.2
     kill "$(jobs -p)" 2>/dev/null
     rm "$locsync" &>/dev/null
     printf "\e[?25h\n"
     return 0
 }
+
 
 draw_bar() {
     printf "\e[?25l"
@@ -54,6 +58,7 @@ draw_bar() {
     done
 }
 
+
 print_help() {
     printf "\033[1m\033[4mALD\033[24m\tApply & manage container image based os deployments\033[0m\n\n"
     printf "\033[1mUsage:\033[0m\tald SUBCOMMAND [OPTIONS]... [ARGUMENTS]...\n\n"
@@ -61,7 +66,6 @@ print_help() {
     printf "\thelp\t\tPrint this menu\n"
     printf "\tstatus\t\tPrint active and available deployments and their versions\n"
     printf "\tpull\t\tPull the newest version of the upstream container image, if a new version is available\n"
-    printf "\tbuild\t\tBuild a Containerfile in %s\n" "${ALD_PATH:?}"
     printf "\tswap\t\tReplace the currently active deployment with another specified, available one\n"
     printf "\trm\t\tRemove a specified, available deployment\n"
     printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
@@ -70,9 +74,6 @@ print_help() {
     printf "\t\t\tOptions:\n"
     printf "\t\t\t\t-u\tPull newest image before deploying\n"
     printf "\t\t\t\t\t(Same as \`ald pull\`)\n"
-    printf "\t\t\t\t-b\tBuild the local Containerfile before deploying\n"
-    printf "\t\t\t\t\tCurrently required for the local image to be used\n"
-    printf "\t\t\t\t\t(Same as \`ald build\`)\n"
     printf "\t\t\t\t-s\tSwap to the new deployment immediately after building\n"
     printf "\t\t\t\t\t(Same as \`ald swap DEPLOYMENT\`)\n"
     printf "\t\t\t\t-g\tTrigger gc after deploying\n"
@@ -96,6 +97,7 @@ print_help() {
     printf "\t\t\t\t--fg\tUpdate grub on fedora x86_64 systems\n"
 }
 
+
 print_status() {
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
     depl_version="$(grep ^VERSION= < "/usr/lib/os-release" | cut -d'=' -f2)"
@@ -114,6 +116,7 @@ print_status() {
     done
 }
 
+
 fail_ex() {
     printf "\n\033[31;1mCritical Failure!\033[0m\n%s\n\n" "$2"
     if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
@@ -129,8 +132,10 @@ fail_ex() {
     fi
     mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
     find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    dissolve_chroot
     exit 1
 }
+
 
 pull_image() {
     pprint "Checking for updates..."
@@ -141,25 +146,83 @@ pull_image() {
         exit 0
     else
         pprint "Pulling $SOURCE_IMAGE..."
-        if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
+        if [[ "$tput_support" == "y" ]]; then echo ""  > "$locsync" && tput smcup; fi
         podman pull "$SOURCE_IMAGE" || fail_ex "-1" "Pulling image failed."
         if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
     fi
 }
 
-build_image() {
-    pprint "Building local image..."
-    if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}" || fail_ex "-1" "Building image failed."
-    if [[ "$tput_support" == "y" ]]; then echo "Finished building image..." > "$locsync" && tput rmcup; fi
+
+setup_chroot() {
+    mount -t proc /proc "${ALD_PATH:?}/image/proc" || return 1
+    mount -t sysfs /sys "${ALD_PATH:?}/image/sys" || return 1
+    mount -t tmpfs ald_tmp "${ALD_PATH:?}/image/tmp" || return 1
+
+    mount -t overlay usr_overlay -o lowerdir="${ALD_PATH:?}/image/usr",upperdir="${ALD_PATH:?}/user/usr",workdir="${ALD_PATH:?}/user/.usr_work" "${ALD_PATH:?}/image/usr" || return 1
+    mount -t overlay etc_overlay -o lowerdir="${ALD_PATH:?}/image/etc",upperdir="${ALD_PATH:?}/user/etc",workdir="${ALD_PATH:?}/user/.etc_work" "${ALD_PATH:?}/image/etc" || return 1
 }
 
+
+dissolve_chroot() {
+    for dir in "${ALD_PATH:?}/image/"*/; do
+        umount -f "$dir" &>/dev/null
+    done
+}
+
+
+build_image() {
+    next_id="$1"
+
+    pprint "Building local image..."
+    if [[ ! -d "${ALD_PATH:?}/user/usr" ]]; then
+        mkdir -p "${ALD_PATH:?}/user/"{usr,etc,.usr_work,.etc_work}
+    fi
+    if [[ ! -L "${ALD_PATH:?}/image/bin" ]]; then
+        mkdir -p "${ALD_PATH:?}/image/"{dev,proc,sys,tmp}
+        ln -sfr "${ALD_PATH:?}/image/usr/bin" "${ALD_PATH:?}/image/bin"
+        ln -sfr "${ALD_PATH:?}/image/usr/lib" "${ALD_PATH:?}/image/lib"
+        ln -sfr "${ALD_PATH:?}/image/usr/lib64" "${ALD_PATH:?}/image/lib64"
+        ln -sfr "${ALD_PATH:?}/image/usr/sbin" "${ALD_PATH:?}/image/sbin"
+    fi
+    if [[ ! -f "${ALD_PATH:?}/setup_script" ]]; then
+        cat > "${ALD_PATH:?}/setup_script" << EOF
+#!/usr/bin/env bash
+set -oue pipefail
+
+### Customizations go below
+EOF
+    fi
+
+    rm -rf "${ALD_PATH:?}/user/etc/resolv.conf"
+    cat /etc/resolv.conf > "${ALD_PATH:?}/user/etc/resolv.conf"
+
+    setup_chroot
+
+    pprint "Syncing system configuration..."
+    if [[ "$STATE" == "drop" ]]; then
+        reset_state "$next_id"
+    else
+        rsync -alHcx --exclude "resolv.conf" --delete /etc "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't place system config."
+    fi
+    podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+    podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
+
+    echo ""  > "$locsync"
+    cp "${ALD_PATH:?}/setup_script" "${ALD_PATH:?}/image/setup_script"
+    chmod +x "${ALD_PATH:?}/image/setup_script"
+    if [[ "$tput_support" == "y" ]]; then echo ""  > "$locsync" && tput smcup; fi
+    chroot "${ALD_PATH:?}/image" /usr/bin/bash -c /setup_script
+    if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
+    rm -f "${ALD_PATH:?}/image/setup_script"
+
+    sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/user/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/user/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
+    rm "${ALD_PATH:?}"/{passwd,shadow} || fail_ex "$next_id" "Couldn't place system config."
+}
 
 
 setup_dep() {
     shift
-    if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
-    if [[ "$*" == "-"*"b"* ]]; then build_image && sleep 1 && SOURCE_IMAGE="$LOCAL_TAG"; fi
 
     pprint "Retrieving vars..."
     current_id="$(cat "${ALD_PATH:?}/current")"
@@ -169,13 +232,10 @@ setup_dep() {
 
     trap 'fail_ex $next_id "Failed to create deployment."' INT TERM
 
+    if [[ "$*" == "-"*"u"* ]]; then pull_image; fi
+
     pprint "Unlocking image storage..."
     find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
-
-    pprint "Creating directories..."
-    mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
-    mkdir -p "${ALD_PATH:?}/init" || fail_ex "$next_id" "Couldn't create init directory."
-    mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
 
     pprint "Syncing image root to fs..."
     podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
@@ -185,23 +245,21 @@ setup_dep() {
     rsync -aHlx "$MOUNTC"/usr/etc/ "${ALD_PATH:?}/image/etc/" &>/dev/null
     podman unmount ald-tmp &>/dev/null || printf "Temporary container still mounted!\n"
 
+    build_image "$next_id"
+
+    pprint "Creating directories..."
+    mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
+    mkdir -p "${ALD_PATH:?}/init" || fail_ex "$next_id" "Couldn't create init directory."
+    mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
+
+    dissolve_chroot
+
     pprint "Creating deployment $next_id..."
     rsync -aHlx --link-dest="${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHIlx --link-dest="${ALD_PATH:?}/user/usr/" "${ALD_PATH:?}/user/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "${ALD_PATH:?}/image/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHIlx "${ALD_PATH:?}/user/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
     ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
-
-    pprint "Syncing system configuration..."
-    if [[ "$STATE" == "drop" ]]; then
-        reset_state "$next_id"
-    else
-        rsync -alHx /etc "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place system config."
-    fi
-    podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
-    podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
-
-    sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
-    sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
-    rm "${ALD_PATH:?}"/{passwd,shadow} || fail_ex "$next_id" "Couldn't place system config."
 
     podman rm ald-tmp &>/dev/null || fail_ex "$next_id" "Couldn't remove temporary container."
 
@@ -212,6 +270,10 @@ setup_dep() {
     cp -rfa "$new_init" "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place new initramfs."
 
     deduplicate_boot_files
+
+    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
+    if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
+    if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
 
     cp -rfa "${ALD_PATH:?}$BOOT_PATH.conf" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Couldn't place boot config."
     cp -rfa "${ALD_PATH:?}/init/init.sh" "$ALD_PATH/init/$next_id.sh" || fail_ex "$next_id" "Couldn't place init script."
@@ -225,12 +287,10 @@ setup_dep() {
 
     pprint "Deployment $next_id installed!"
 
-    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
-    if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
-    if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
     pprint "Locking image storage..."
     find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
 }
+
 
 show_updates() {
     rpm --version &>/dev/null || fail_ex "-1" "Currently only rpm-based systems are supported."
@@ -248,6 +308,7 @@ show_updates() {
     diff -y "$HOME/.old" "$HOME/.new" | grep "|\|>\|<" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
     rm "$HOME/"{.old,.new} || printf "Failed to delete temporary files.\n"
 }
+
 
 swap_deployment() {
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
@@ -272,15 +333,18 @@ swap_deployment() {
     find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
 }
 
+
 reset_state() {
     pprint "Syncing absolutely required config..."
+    rm -rf "${ALD_PATH:?}/user/etc" || fail_ex "$1" "Resetting /etc failed."
     cp -rfa --parents /etc/fstab /etc/crypttab /etc/locale.conf /etc/localtime /etc/adjtime \
         /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid \
         /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
         /etc/firewalld /etc/environment /etc/hostname \
         /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers \
-        "${ALD_PATH:?}/$1/" || fail_ex "$1" "Resetting /etc failed."
+        "${ALD_PATH:?}/user/" || fail_ex "$1" "Resetting /etc failed."
 }
+
 
 apply_selinux_policy() {
     pprint "Relabeling deployment $1..."
@@ -288,14 +352,16 @@ apply_selinux_policy() {
     setfiles -r "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$1/etc/selinux/targeted/contexts/files/file_contexts" "${ALD_PATH:?}/$1" &>/dev/null
 }
 
+
 deduplicate_boot_files() {
     pprint "Deduplicating inactive deployments..."
     read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
-    if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
+    if [[ "$tput_support" == "y" ]]; then echo ""  > "$locsync" && tput smcup; fi
         hardlink -tXOv -s1 "${available_boot_files[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
-    echo "" > "$locsync"
+    echo ""  > "$locsync"
 }
+
 
 rm_dep() {
     pprint "Unlocking image storage..."
@@ -315,11 +381,13 @@ rm_dep() {
     find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
 }
 
+
 rm_deps() {
     while [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | wc -l)" -gt "$((KEEP_DEPS-1))" ]]; do
         rm_dep "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | head -n1)"
     done
 }
+
 
 init_ald() {
     shift
@@ -352,6 +420,7 @@ init_ald() {
 
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
+
 
 update_ald() {
     pprint "Initiating self-update..."
@@ -388,6 +457,7 @@ update_ald() {
     pprint "Self-update finished"
 }
 
+
 update_bootloader() {
     if [[ "$*" == *"--fg"* ]]; then
         fedora_grub
@@ -395,6 +465,7 @@ update_bootloader() {
         printf "No bootloader seems to be available for this configuration."
     fi
 }
+
 
 fedora_grub() {
     mkdir "${ALD_PATH:?}/tmp-boot"
@@ -452,7 +523,9 @@ EOF
     pprint "Update complete!\n"
 }
 
+
 source "$(dirname "$(readlink -f "$0")")/ald-config.sh" &>/dev/null || printf "No config found, using defaults...\n"
+
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
@@ -472,7 +545,7 @@ then tput_support="y";
 else tput_support="n"; fi
 
 locsync="/dev/shm/sync$$"
-echo "" > "$locsync"
+echo ""  > "$locsync"
 draw_bar "$locsync" &
 
 declare -A -r RUN_CMD=(
