@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -oue pipefail
-
-### Customizations go below
