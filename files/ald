@@ -195,7 +195,7 @@ setup_dep() {
     pprint "Creating deployment $next_id..."
     rsync -aHlx --link-dest="${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "${ALD_PATH:?}/image/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
-    ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
+    # ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
 
     pprint "Syncing system configuration..."
     if [[ "$STATE" == "drop" ]]; then
@@ -259,26 +259,24 @@ show_updates() {
 
 
 swap_deployment() {
-    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
+    PREFIX=""
+    if [[ "$*" == *"initramfs"* ]]; then PREFIX="/sysroot"; fi
+    if [[ "$(find "$PREFIX${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
-    pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
-    chattr -i / || fail_ex "-1" "Couldn't unlock /."
-    (mountpoint /usr &>/dev/null && umount -l /usr) || fail_ex "-1" "Couldn't temporarily remove /usr bind mount."
-    exch /usr "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
-    exch /etc "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
-    mount -o bind,ro /usr /usr || printf "Restoring /usr bind mount failed, fs is rw."
-    chattr +i / || printf "Couldn't lock /.\n"
-    mv "${ALD_PATH:?}/$1" "$ALD_PATH/$(cat "$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
-    echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
-    systemctl daemon-reexec || printf "Couldn't reexec systemd, system might behave weirdly."
-    for user in $(users | awk '{ print $1 }'); do
-        sudo -u "$user" env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$(id -u "$user")"/bus systemctl --user daemon-reexec || printf "Couldn't reexec systemd, system might behave weirdly."
-    done
+    find "$PREFIX${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
+    pprint "Replacing deployment $(cat "$PREFIX${ALD_PATH:?}/current") with $1."
+    chattr -i "$PREFIX/" || fail_ex "-1" "Couldn't unlock /."
+    (mountpoint "$PREFIX/usr" &>/dev/null && umount -l "$PREFIX/usr") || fail_ex "-1" "Couldn't temporarily remove /usr bind mount."
+    exch "$PREFIX/usr" "$PREFIX${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
+    exch "$PREFIX/etc" "$PREFIX${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
+    mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || printf "Restoring /usr bind mount failed, fs is rw."
+    chattr +i "$PREFIX/" || printf "Couldn't lock /.\n"
+    mv "$PREFIX${ALD_PATH:?}/$1" "$PREFIX$ALD_PATH/$(cat "$PREFIX$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
+    echo "$1" > "$PREFIX${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     pprint "Locking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    find "$PREFIX${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
 }
 
 
@@ -533,7 +531,7 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             pull_image
             ;;
         NJsoQnUMHEfpe)
-            swap_deployment "$2"
+            swap_deployment "$2" "${3-}"
             ;;
         nQ8tKSuA0SJoy)
             setup_dep "$@"

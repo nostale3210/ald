@@ -1,0 +1,18 @@
+[Unit]
+Description=Swap ALD deployment on boot
+DefaultDependencies=no
+ConditionKernelCommandLine=mat.boot
+ConditionPathExists=/etc/initrd-release
+After=sysroot.mount
+Requires=sysroot.mount
+Before=initrd-root-fs.target
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/ald-boot.sh
+StandardInput=null
+StandardOutput=journal
+StandardError=journal+console
+RemainAfterExit=yes
