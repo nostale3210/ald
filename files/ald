@@ -277,7 +277,7 @@ reset_state() {
         /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid \
         /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
         /etc/firewalld /etc/environment /etc/hostname \
-        /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers \
+        /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers /etc/ald \
         "${ALD_PATH:?}/$1/" || fail_ex "$1" "Resetting /etc failed."
 }
 
@@ -340,9 +340,6 @@ init_ald() {
         (grep -q initrd "${ALD_PATH:?}/boot.conf" && sed -i "s/^initrd .*$/initrd \/INSERT_DEPLOYMENT\/initramfs.img/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
         (grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 ald.boot=INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
     fi
-
-    mkdir -p "${CONFIG_PATH:?}"
-    mv "${ALD_PATH:?}"/{ald-config,Containerfile} "${CONFIG_PATH}"
 
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
     STATE="drop"
