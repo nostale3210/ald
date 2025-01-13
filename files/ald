@@ -261,22 +261,22 @@ show_updates() {
 swap_deployment() {
     PREFIX=""
     if [[ -f "/etc/initrd-release" ]]; then PREFIX="/sysroot"; fi
-    if [[ "$(find "$PREFIX${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
-    find "$PREFIX${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
-    pprint "Replacing deployment $(cat "$PREFIX${ALD_PATH:?}/current") with $1."
-    chattr -i "$PREFIX/" || fail_ex "-1" "Couldn't unlock /."
-    (mountpoint "$PREFIX/usr" &>/dev/null && umount -l "$PREFIX/usr") || fail_ex "-1" "Couldn't temporarily remove /usr bind mount."
-    exch "$PREFIX/usr" "$PREFIX${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
-    exch "$PREFIX/etc" "$PREFIX${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
+    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
+    pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
+    chattr -i "$PREFIX/" || printf "Couldn't unlock /.\n"
+    (mountpoint "$PREFIX/usr" &>/dev/null && umount -l "$PREFIX/usr") || printf "Couldn't temporarily remove /usr bind mount.\n"
+    exch "$PREFIX/usr" "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
+    exch "$PREFIX/etc" "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
     mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || printf "Restoring /usr bind mount failed, fs is rw."
     chattr +i "$PREFIX/" || printf "Couldn't lock /.\n"
-    mv "$PREFIX${ALD_PATH:?}/$1" "$PREFIX$ALD_PATH/$(cat "$PREFIX$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
-    echo "$1" > "$PREFIX${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
+    mv "${ALD_PATH:?}/$1" "$ALD_PATH/$(cat "$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
+    echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     pprint "Locking image storage..."
-    find "$PREFIX${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
 }
 
 
@@ -479,9 +479,13 @@ EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
 STATE="${ALD_STATE:-keep}"
 KEEP_DEPS="${KEEP_DEPS:-4}"
 
-if ! podman --version &>/dev/null || ! rsync --version &>/dev/null; then
-    fail_ex "-1" "Dependency check failed! Are podman and rsync installed?"
-fi
+if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH"; fi
+
+dependency_check() {
+    if ! podman --version &>/dev/null || ! rsync --version &>/dev/null; then
+        fail_ex "-1" "Dependency check failed! Are podman and rsync installed?"
+    fi
+}
 
 if (infocmp 2>/dev/null | grep -q smcup) &&
     (infocmp 2>/dev/null | grep -q rmcup);
@@ -525,21 +529,25 @@ if [[ "$(id -u)" != "0" ]]; then
 elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
     case "$1" in
         lwPOgI3J0zn6q)
+            dependency_check
             build_image
             ;;
         SPRjLFOXJvXt7)
+            dependency_check
             pull_image
             ;;
         NJsoQnUMHEfpe)
             swap_deployment "$2" "${3-}"
             ;;
         nQ8tKSuA0SJoy)
+            dependency_check
             setup_dep "$@"
             ;;
         ONK3quF6NgVfC)
             rm_dep "$2"
             ;;
         YhOp7NCvu2blO)
+            dependency_check
             init_ald "$@"
             ;;
         fM2KhAo1Ko0Pk)
@@ -549,9 +557,11 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             deduplicate_boot_files
             ;;
         QUd1eE2e8cEdn)
+            dependency_check
             update_ald "${2-}"
             ;;
         QjPZu7VH36P6n)
+            dependency_check
             update_bootloader "$@"
             ;;
         diff)
@@ -576,12 +586,19 @@ if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
 
 printf "\n"
 
+ALD_CMD=( 'systemd-inhibit' '--what=idle:sleep:shutdown' '--who=ALD' '--why="Modifying/Creating deployments..."' )
+
+
 for possible_cmd in "${!RUN_CMD[@]}"; do
     if [[ "$1" == "$possible_cmd" ]]; then
         shift
         set -e
-        systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
-            "${ALD_PATH:?}/ald" "${RUN_CMD[$possible_cmd]}" "$@"
+        if [[ -f "/etc/initrd-release" ]]; then
+            ald "${RUN_CMD[$possible_cmd]}" "$@"
+        else
+            systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
+                ald "${RUN_CMD[$possible_cmd]}" "$@"
+        fi
         exit 0
     fi
 done

@@ -60,6 +60,8 @@ install() {
     dracut_install /usr/bin/find
     dracut_install /usr/bin/mount
     dracut_install /usr/bin/mountpoint
+    dracut_install /usr/bin/dirname
+    dracut_install /usr/bin/id
 
     inst_simple "${systemdsystemunitdir}/ald-boot.service"
     mkdir -p "${initdir}${systemdsystemconfdir}/initrd-root-fs.target.wants"
