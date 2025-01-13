@@ -224,7 +224,7 @@ setup_dep() {
     pprint "Deployment $next_id installed!"
 
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" 
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -265,7 +265,7 @@ swap_deployment() {
     mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$(cat "${ALD_PATH:?}/current")" || printf "Renaming old deployment failed, naming out of sync."
     echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -310,7 +310,7 @@ rm_dep() {
     rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/loader/entries/$1.conf"
     mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -418,9 +418,9 @@ EOF
     pprint "Update complete!\n"
 }
 
-CONFIG_PATH="${CONFIG_PATH:-/etc/ald-config}"
+CONFIG_PATH="${CONFIG_PATH:-/etc/ald}"
 
-source "$CONFIG_PATH" &>/dev/null || printf "No config found, using defaults...\n"
+source "$CONFIG_PATH/ald-config" &>/dev/null || printf "No config found, using defaults...\n"
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
