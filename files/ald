@@ -91,10 +91,6 @@ print_help() {
     printf "\t\t\t\t-z\tRelabel files according to the new deployment's selinux policy\n"
     printf "\t\t\t\t--ex\tUse a customised %s,\n\t\t\t\t\tit will be used instead of an automatically generated entry\n" "${ALD_PATH:?}/boot.conf.ex"
 
-    printf "\tself-update\tUpdate ALD and static binaries\n"
-    printf "\t\t\tOptions:\n"
-    printf "\t\t\t\t-f\tSkip update check\n"
-
     printf "\tbootloader_update\tUpdate the system's bootloader\n"
     printf "\t\t\tOptions (one is required):\n"
     printf "\t\t\t\t--fg\tUpdate grub on fedora x86_64 systems\n"
@@ -134,7 +130,7 @@ fail_ex() {
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
     fi
     mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}"
     exit 1
 }
 
@@ -158,7 +154,7 @@ pull_image() {
 build_image() {
     pprint "Building local image..."
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${ALD_PATH:?}" || fail_ex "-1" "Building image failed."
+    podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${CONFIG_PATH:?}" || fail_ex "-1" "Building image failed."
     if [[ "$tput_support" == "y" ]]; then echo "Finished building image..." > "$locsync" && tput rmcup; fi
 }
 
@@ -177,25 +173,23 @@ setup_dep() {
     trap 'fail_ex $next_id "Failed to create deployment."' INT TERM
 
     pprint "Unlocking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}"
 
     pprint "Creating directories..."
     mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
-    mkdir -p "${ALD_PATH:?}/init" || fail_ex "$next_id" "Couldn't create init directory."
     mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
 
     pprint "Syncing image root to fs..."
     podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
     MOUNTC="$(podman mount ald-tmp)"
     mkdir -p "${ALD_PATH:?}/image"
-    rsync -aHlcx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHlx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "$MOUNTC"/usr/etc/ "${ALD_PATH:?}/image/etc/" &>/dev/null
     podman unmount ald-tmp &>/dev/null || printf "Temporary container still mounted!\n"
 
     pprint "Creating deployment $next_id..."
-    rsync -aHlx --link-dest="${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHlx --link-dest="../../image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "${ALD_PATH:?}/image/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
-    # ln -s "${ALD_PATH:?}/ald" "$ALD_PATH/$next_id/usr/bin/ald"
 
     pprint "Syncing system configuration..."
     if [[ "$STATE" == "drop" ]]; then
@@ -219,24 +213,18 @@ setup_dep() {
 
     deduplicate_boot_files
     if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
-    if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
-    if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
 
     pprint "Preparing boot entry..."
-    cp -rfa "${ALD_PATH:?}$BOOT_PATH.conf" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Couldn't place boot config."
-    cp -rfa "${ALD_PATH:?}/init/init.sh" "$ALD_PATH/init/$next_id.sh" || fail_ex "$next_id" "Couldn't place init script."
-    chmod +x "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Couldn't place init script."
-
-    sed -i "s@INSERT_DEPLOYMENT@$next_id@g" "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Placing template files for $ID failed."
-    sed -i "s@ALD_PATH@$ALD_PATH@g" "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Placing template files for $ID failed."
-    chattr -f +i "${ALD_PATH:?}/init/$next_id.sh" || fail_ex "$next_id" "Placing template files for $ID failed."
+    cp -rfa "${ALD_PATH:?}/boot.conf" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Couldn't place boot config."
     sed -i "s@INSERT_DEPLOYMENT@$next_id@g" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Placing template files for $ID failed."
-    sed -i "s@ALD_PATH@$ALD_PATH@g" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Placing template files for $ID failed."
+
+    if [[ "$*" == "-"*"s"* ]]; then swap_deployment "$next_id"; fi
+    if [[ "$*" == "-"*"g"* ]]; then rm_deps; fi
 
     pprint "Deployment $next_id installed!"
 
     pprint "Locking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" 
 }
 
 
@@ -265,18 +253,19 @@ swap_deployment() {
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}" 
     pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
     chattr -i "$PREFIX/" || printf "Couldn't unlock /.\n"
-    (mountpoint "$PREFIX/usr" &>/dev/null && umount -l "$PREFIX/usr") || printf "Couldn't temporarily remove /usr bind mount.\n"
+    (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rl "$PREFIX/usr") || printf "Couldn't temporarily remove /usr bind mount.\n"
     exch "$PREFIX/usr" "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
     exch "$PREFIX/etc" "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
     mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || printf "Restoring /usr bind mount failed, fs is rw."
+    mount -o bind,rw "$PREFIX/usr/local" "$PREFIX/usr/local" || printf "Restoring /usr bind mount failed, fs is rw."
     chattr +i "$PREFIX/" || printf "Couldn't lock /.\n"
-    mv "${ALD_PATH:?}/$1" "$ALD_PATH/$(cat "$ALD_PATH/current")" || printf "Renaming old deployment failed, naming out of sync."
+    mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$(cat "${ALD_PATH:?}/current")" || printf "Renaming old deployment failed, naming out of sync."
     echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     pprint "Locking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}"
 }
 
 
@@ -310,20 +299,18 @@ deduplicate_boot_files() {
 
 rm_dep() {
     pprint "Unlocking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
-    chattr -f -i "${ALD_PATH:?}/init/$1.sh"
+    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}"
     pprint "Removing deployment $1..."
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
     fi
     podman rm ald-tmp &>/dev/null
     rm -rf "${ALD_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/$1"
-    rm -rf "${ALD_PATH:?}/init/$1.sh" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/init/$1.sh" 
     rm -rf "${BOOT_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/$1"
     rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/loader/entries/$1.conf"
     mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
     pprint "Locking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
+    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}"
 }
 
 
@@ -338,14 +325,8 @@ init_ald() {
     shift
 
     ln -s "${ALD_PATH:?}/ald" /usr/bin/ald
-    mkdir -p "${ALD_PATH:?}/init/safe"
     mkdir -p /var/usrlocal
     echo "0" > "${ALD_PATH:?}/current"
-    mv "${ALD_PATH:?}"/init.sh "$ALD_PATH/init/"
-    mv "${ALD_PATH:?}"/{busybox,exch} "$ALD_PATH/init/safe/"
-    chattr -f +i "${ALD_PATH:?}/init/init.sh"
-    chattr -f +i "${ALD_PATH:?}/init/safe/exch"
-    chattr -f +i "${ALD_PATH:?}/init/safe/busybox"
     boot_conf="$(find "${BOOT_PATH:?}/loader/entries" | sort | tail -n1)"
     if [[ "$*" == *"--ex"* ]]; then
         mv -f "${ALD_PATH:?}/boot.conf.ex" "${ALD_PATH:?}/boot.conf"
@@ -355,51 +336,20 @@ init_ald() {
         (grep -q version "${ALD_PATH:?}/boot.conf" && sed -i "s/^version .*$/version INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
         (grep -q linux "${ALD_PATH:?}/boot.conf" && sed -i "s/^linux .*$/linux \/INSERT_DEPLOYMENT\/vmlinuz/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
         (grep -q initrd "${ALD_PATH:?}/boot.conf" && sed -i "s/^initrd .*$/initrd \/INSERT_DEPLOYMENT\/initramfs.img/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 init=ALD_PATH\/init\/INSERT_DEPLOYMENT.sh/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
+        (grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 ald.boot=INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
     fi
+
+    mkdir -p "${CONFIG_PATH:?}"
+    mv "${ALD_PATH:?}"/{ald-config,Containerfile} "${CONFIG_PATH}"
 
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
     STATE="drop"
     setup_dep
     if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "1"; fi
 
+    rm "${ALD_PATH:?}/ald"
+
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
-}
-
-
-update_ald() {
-    pprint "Initiating self-update..."
-    SOURCE_IMAGE="ghcr.io/nostale3210/ald-utils:latest"
-    if [[ "$*" != "-"*"f"* ]]; then pull_image "1"; fi
-    pprint "Unlocking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null && umount -f {} {} &>/dev/null' \;
-
-    pprint "Retrieving updated files..."
-    podman create --name ald-utils "$SOURCE_IMAGE" &>/dev/null || fail_ex "-1" "Couldn't sync files."
-    podman cp ald-utils:/ald/ald "${ALD_PATH:?}/ald.bak" || fail_ex "-1" "Couldn't sync files."
-    podman cp ald-utils:/ald/init.sh "${ALD_PATH:?}/init.bak" || fail_ex "-1" "Couldn't sync files."
-    podman cp ald-utils:/ald/exch "${ALD_PATH:?}/exch.bak" || fail_ex "-1" "Couldn't sync files."
-    podman cp ald-utils:/ald/busybox "${ALD_PATH:?}/busybox.bak" || fail_ex "-1" "Couldn't sync files."
-    podman rm ald-utils &>/dev/null
-
-    pprint "Attempting to replace files atomically..."
-    chattr -f -i "${ALD_PATH:?}/init/init.sh"
-    chattr -f -i "${ALD_PATH:?}/init/safe/exch"
-    chattr -f -i "${ALD_PATH:?}/init/safe/busybox"
-    touch "${ALD_PATH:?}/init/safe"/{exch,busybox} &>/dev/null || true
-    exch "${ALD_PATH:?}/init.bak" "${ALD_PATH:?}/init/init.sh" || printf "init.sh couldn't be updated"
-    exch "${ALD_PATH:?}/exch.bak" "${ALD_PATH:?}/init/safe/exch" || printf "exch couldn't be updated"
-    exch "${ALD_PATH:?}/busybox.bak" "${ALD_PATH:?}/init/safe/busybox" || printf "busybox couldn't be updated"
-    exch "${ALD_PATH:?}/ald.bak" "${ALD_PATH:?}/ald" || printf "ald couldn't be updated"
-    chattr -f +i "${ALD_PATH:?}/init/init.sh"
-    chattr -f +i "${ALD_PATH:?}/init/safe/exch"
-    chattr -f +i "${ALD_PATH:?}/init/safe/busybox"
-    rm "${ALD_PATH:?}"/{ald.bak,init.bak,exch.bak,busybox.bak}
-
-    pprint "Locking image storage..."
-    find "${ALD_PATH:?}" -mindepth 2 -maxdepth 2 -type d -name "usr" -exec bash -c 'mountpoint {} &>/dev/null || mount -o bind,ro {} {} &>/dev/null' \;
-
-    pprint "Self-update finished"
 }
 
 
@@ -468,12 +418,13 @@ EOF
     pprint "Update complete!\n"
 }
 
+CONFIG_PATH="${CONFIG_PATH:-/etc/ald-config}"
 
-source "$(dirname "$(readlink -f "$0")")/ald-config.sh" &>/dev/null || printf "No config found, using defaults...\n"
+source "$CONFIG_PATH" &>/dev/null || printf "No config found, using defaults...\n"
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
-ALD_PATH="${ALD_PATH:-/var/deployments}"
+ALD_PATH="${ALD_PATH:-/.ald}"
 BOOT_PATH="${BOOT_PATH:-/boot}"
 EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
 STATE="${ALD_STATE:-keep}"
@@ -503,7 +454,6 @@ declare -A -r RUN_CMD=(
     ["dep"]="nQ8tKSuA0SJoy"
     ["rm"]="ONK3quF6NgVfC"
     ["gc"]="fM2KhAo1Ko0Pk"
-    ["init"]="YhOp7NCvu2blO"
     ["dedupe"]="29UtiseMD5Vji"
     ["self-update"]="QUd1eE2e8cEdn"
     ["bootloader-update"]="QjPZu7VH36P6n"
@@ -546,7 +496,7 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
         ONK3quF6NgVfC)
             rm_dep "$2"
             ;;
-        YhOp7NCvu2blO)
+        init)
             dependency_check
             init_ald "$@"
             ;;
@@ -585,8 +535,6 @@ if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
 (systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running."
 
 printf "\n"
-
-ALD_CMD=( 'systemd-inhibit' '--what=idle:sleep:shutdown' '--who=ALD' '--why="Modifying/Creating deployments..."' )
 
 
 for possible_cmd in "${!RUN_CMD[@]}"; do

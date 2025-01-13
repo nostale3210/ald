@@ -7,7 +7,7 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
-ALD_PATH="${ALD_PATH:-/var/deployments}"
+ALD_PATH="${ALD_PATH:-/.ald}"
 FLAGS=()
 
 podman cp "$(podman create --name ald-tmp ghcr.io/nostale3210/ald-utils:latest)":/ald "${ALD_PATH:?}" ||

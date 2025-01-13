@@ -1,11 +1,11 @@
 name: build-ald-utils
 on:
   pull_request:
-  schedule:
-    - cron: '0 0 * * 0'
+  #  schedule:
+  #    - cron: '0 0 * * 0'
   push:
-      branches:
-        - "main"
+     branches:
+       - "main"
   workflow_dispatch:
 
 env:
@@ -64,7 +64,6 @@ jobs:
             --label=org.opencontainers.image.description=ald-utils \
             --label=org.opencontainers.image.version=main \
             --pull=newer --tag="localhost/ald-utils" \
-            --target="ald" \
             -f ./Containerfile
 
       - name: Push image

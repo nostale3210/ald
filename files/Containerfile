@@ -3,7 +3,7 @@ ARG SOURCE_IMAGE="${SOURCE_IMAGE}"
 
 FROM "${SOURCE_IMAGE}"
 
-RUN sed -i "s/tsd upgrade/ald dep -ubzdsg/g" /usr/libexec/sys-up && \
+RUN sed -i "s/tsd upgrade/ald dep -ubzsg/g" /usr/libexec/sys-up && \
     sed -i "s/\"bootc\"/\"ald\"/g" /usr/libexec/sys-up
 
 RUN chmod 4755 /usr/bin/newgidmap && \
