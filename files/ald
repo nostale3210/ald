@@ -129,8 +129,8 @@ fail_ex() {
         rm -rf "${BOOT_PATH:?}/${1:?}"
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
     fi
-    mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
-    mountpoint "${ALD_PATH:?}"
+    mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
+    mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
     exit 1
 }
 
@@ -173,7 +173,7 @@ setup_dep() {
     trap 'fail_ex $next_id "Failed to create deployment."' INT TERM
 
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}"
 
     pprint "Creating directories..."
     mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
@@ -183,7 +183,7 @@ setup_dep() {
     podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
     MOUNTC="$(podman mount ald-tmp)"
     mkdir -p "${ALD_PATH:?}/image"
-    rsync -aHlx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHlcx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "$MOUNTC"/usr/etc/ "${ALD_PATH:?}/image/etc/" &>/dev/null
     podman unmount ald-tmp &>/dev/null || printf "Temporary container still mounted!\n"
 
@@ -223,8 +223,10 @@ setup_dep() {
 
     pprint "Deployment $next_id installed!"
 
+    if [[ -f "${ALD_PATH:?}/ald" ]]; then rm "${ALD_PATH:?}/ald"; fi
+
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -253,7 +255,7 @@ swap_deployment() {
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}" 
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}" 
     pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
     chattr -i "$PREFIX/" || printf "Couldn't unlock /.\n"
     (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rl "$PREFIX/usr") || printf "Couldn't temporarily remove /usr bind mount.\n"
@@ -265,7 +267,7 @@ swap_deployment() {
     mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$(cat "${ALD_PATH:?}/current")" || printf "Renaming old deployment failed, naming out of sync."
     echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -299,7 +301,7 @@ deduplicate_boot_files() {
 
 rm_dep() {
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" && umount -f "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}"
     pprint "Removing deployment $1..."
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
@@ -308,9 +310,9 @@ rm_dep() {
     rm -rf "${ALD_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/$1"
     rm -rf "${BOOT_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/$1"
     rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/loader/entries/$1.conf"
-    mountpoint /usr &>/dev/null || mount -o bind,ro /usr /usr
+    mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
     pprint "Locking image storage..."
-    mountpoint "${ALD_PATH:?}" || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
 
@@ -346,8 +348,6 @@ init_ald() {
     STATE="drop"
     setup_dep
     if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "1"; fi
-
-    rm "${ALD_PATH:?}/ald"
 
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
