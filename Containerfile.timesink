@@ -5,6 +5,9 @@ COPY boot/90ald /usr/lib/dracut/modules.d/90ald
 COPY boot/ald-boot.service /usr/lib/systemd/system/ald-boot.service
 COPY boot/ald-boot.sh /usr/libexec/ald-boot.sh
 
+RUN chmod +x /usr/bin/ald && \
+    chmod +x /usr/libexec/ald-boot.sh
+
 RUN KVER="$(rpm -q kernel --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')" && \
     dracut --no-hostonly --kver "$KVER" --reproducible -v --add "ald" \
     -f "/usr/lib/modules/$KVER/initramfs.img"
