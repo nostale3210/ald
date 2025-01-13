@@ -1,7 +1,7 @@
 [Unit]
 Description=Swap ALD deployment on boot
 DefaultDependencies=no
-ConditionKernelCommandLine=mat.boot
+ConditionKernelCommandLine=ald.boot
 ConditionPathExists=/etc/initrd-release
 After=sysroot.mount
 Requires=sysroot.mount

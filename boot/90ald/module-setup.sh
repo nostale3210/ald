@@ -54,6 +54,13 @@ install() {
     dracut_install /lib64/libeconf.so.0
     dracut_install /usr/bin/systemd-inhibit
 
+    dracut_install /lib64/libe2p.so.2
+    dracut_install /lib64/libcom_err.so.2
+    dracut_install /usr/bin/chattr
+    dracut_install /usr/bin/find
+    dracut_install /usr/bin/mount
+    dracut_install /usr/bin/mountpoint
+
     inst_simple "${systemdsystemunitdir}/ald-boot.service"
     mkdir -p "${initdir}${systemdsystemconfdir}/initrd-root-fs.target.wants"
     ln_r "${systemdsystemunitdir}/ald-boot.service" \
