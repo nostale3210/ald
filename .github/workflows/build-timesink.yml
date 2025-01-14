@@ -1,11 +1,14 @@
 name: build-experimental-timesink-image
 on:
   pull_request:
-  schedule:
-    - cron: '00 16 * * *'
+    schedule:
+      - cron: '00 16 * * *'
   push:
-      branches:
-        - "main"
+    branches:
+      - "main"
+    paths:
+      - 'boot/**'
+      - 'files/**'
   workflow_dispatch:
 
 env:

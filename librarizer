@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -oue pipefail
+
+bins=(
+    "exch"
+    "chattr"
+    "find"
+    "mount"
+    "mountpoint"
+    "dirname"
+    "id"
+)
+
+libs=()
+for bin in "${bins[@]}"; do
+    read -ra tl <<< "$(ldd "/usr/bin/$bin" | grep "/" | cut -d"(" -f1 | cut -d">" -f2 |
+        sed "s/^\s*//" | tr "\n" " ")"
+    libs+=( "${tl[@]}" )
+done
+echo "$(tr " " "\n" <<< "${libs[@]}" | sort -u | sed "s/^\(.*\)/dracut_install \1/" &&
+printf "\n" &&
+tr " " "\n" <<< "${bins[@]}" | sort -u |
+    sed "s/^\(.*\)/dracut_install \/usr\/bin\/\1/")" |
+    sed "s/^\(.*\)/    \1/" > drc_libs

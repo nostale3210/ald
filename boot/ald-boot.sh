@@ -22,6 +22,7 @@ echo "Current: $active_boot"
 
 mount -o remount,rw /sysroot
 [ ! -d /sysroot/usr ] && mkdir -p /sysroot/usr
+[ ! -d /sysroot/etc ] && mkdir -p /sysroot/etc
 
 echo "Cmdline: $ald_boot (next)"
 echo "Current: $active_boot"
