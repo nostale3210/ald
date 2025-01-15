@@ -15,6 +15,7 @@ echo "Current: $active_boot"
 [ "$active_boot" = "$ald_boot" ] && \
     echo "Cmdline: $ald_boot" && \
     echo "Current: $active_boot" && \
+    mount -o remount,rw /sysroot && \
     (mount -o bind,ro "/sysroot/usr" "/sysroot/usr" || printf "Couldn't bind mount /usr\n") && \
     (mount -o bind,rw "/sysroot/usr/local" "/sysroot/usr/local" || printf "Couldn't bind mount /usr/local\n") && \
     (chattr +i "/sysroot/" || printf "Couldn't lock /.\n") && \

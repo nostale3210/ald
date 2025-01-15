@@ -436,9 +436,15 @@ dependency_check() {
 }
 
 if (infocmp 2>/dev/null | grep -q smcup) &&
-    (infocmp 2>/dev/null | grep -q rmcup);
-then tput_support="y";
-else tput_support="n"; fi
+    (infocmp 2>/dev/null | grep -q rmcup); then
+    tput_support="y";
+else
+    tput_support="n";
+fi
+
+if systemd-inhibit --help &>/dev/null; then
+    sys_inhibit="y";
+fi
 
 locsync="/dev/shm/sync$$"
 echo "" > "$locsync"
@@ -529,7 +535,9 @@ fi
 
 if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
 
-(systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running."
+if [[ "$sys_inhibit" == "y" ]]; then
+    (systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running.";
+fi
 
 printf "\n"
 
@@ -538,11 +546,11 @@ for possible_cmd in "${!RUN_CMD[@]}"; do
     if [[ "$1" == "$possible_cmd" ]]; then
         shift
         set -e
-        if [[ -f "/etc/initrd-release" ]]; then
-            ald "${RUN_CMD[$possible_cmd]}" "$@"
-        else
+        if [[ "$sys_inhibit" == "y" ]]; then
             systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
                 ald "${RUN_CMD[$possible_cmd]}" "$@"
+        else
+            ald "${RUN_CMD[$possible_cmd]}" "$@"
         fi
         exit 0
     fi
