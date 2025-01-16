@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
 pprint() {
-    echo "$1" > "$locsync"
+    if [[ "$tput_support" == "y" ]]; then
+        echo "$1" > "$locsync"
+    else
+        printf "%s\n" "$1"
+    fi
 }
-
-
-trap clean_draw 0
 
 
 clean_draw() {
@@ -23,37 +24,10 @@ draw_bar() {
     local locsync="$1"
     while true; do
         while [[ -z "$(cat "$locsync")" ]]; do sleep 1; done
-        printf "[" && printf -- "-%.0s" $(seq 1 50) && printf "] %s\r" "$(cat "$locsync")"
-        sleep 0.1
-        for i in {1..10}; do
-            printf "[" && printf "=%.0s" $(seq 1 "$i") &&
-                printf -- "-%.0s" $(seq "$((i+1))" 50) && printf "] %s\r" "$(cat "$locsync")"
+        for status in "|" "/" "-" "\\"; do
+            printf "\e[2K\r[%s] %s" "$status" "$(cat "$locsync")"
             sleep 0.1
         done
-        while [[ -n "$(cat "$locsync")" ]]; do
-            for i in {1..39}; do
-                printf "[" && printf -- "-%.0s" $(seq 1 "$i") &&
-                    printf "=%.0s" $(seq 1 10) && printf -- "-%.0s" $(seq "$((i+11))" 50) &&
-                    printf "] %s\r" "$(cat "$locsync")"
-                sleep 0.1
-                if [[ -z "$(cat "$locsync")" ]]; then break 2; fi
-            done
-            printf "[" && printf -- "-%.0s" $(seq 1 40) &&
-                printf "=%.0s" $(seq 1 10) && printf "] %s\r" "$(cat "$locsync")"
-            sleep 0.1
-            for i in {1..9}; do
-                printf "[" && printf "=%.0s" $(seq 1 "$i") &&
-                    printf -- "-%.0s" $(seq 10 49) &&
-                    printf "=%.0s" $(seq "$i" 9) && printf "] %s\r" "$(cat "$locsync")"
-                sleep 0.1
-                if [[ -z "$(cat "$locsync")" ]]; then break 2; fi
-            done
-            printf "\e[2K[" && printf "=%.0s" $(seq 1 10) &&
-                printf -- "-%.0s" $(seq 1 40) && printf "] %s\r" "$(cat "$locsync")"
-            sleep 0.1
-        done
-        printf "\e[2K[" && printf "=%.0s" $(seq 1 50) && printf "] %s\r" "$(cat "$locsync")"
-        sleep 0.1
     done
 }
 
@@ -118,6 +92,7 @@ print_status() {
 
 fail_ex() {
     printf "\n\033[31;1mCritical Failure!\033[0m\n%s\n\n" "$2"
+    rm "$locsync" &>/dev/null
     if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
         pprint "Attempting cleanup..."
         podman rm ald-tmp &>/dev/null
@@ -155,7 +130,7 @@ build_image() {
     pprint "Building local image..."
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
     podman build --build-arg=SOURCE_IMAGE="$SOURCE_IMAGE" -t "$LOCAL_TAG" "${CONFIG_PATH:?}" || fail_ex "-1" "Building image failed."
-    if [[ "$tput_support" == "y" ]]; then echo "Finished building image..." > "$locsync" && tput rmcup; fi
+    if [[ "$tput_support" == "y" ]]; then pprint "Finished building image..." && tput rmcup; fi
 }
 
 
@@ -255,18 +230,29 @@ swap_deployment() {
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}" 
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}" &>/dev/null
+
     pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
-    chattr -i "$PREFIX/" || printf "Couldn't unlock /.\n"
-    (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rl "$PREFIX/usr") || printf "Couldn't temporarily remove /usr bind mount.\n"
+    chattr -i "$PREFIX/" || if [[ ! -f "/etc/initrd-release" ]]; then printf "Couldn't unlock /.\n"; fi
+    (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rfl "$PREFIX/usr") ||
+        if [[ ! -f "/etc/initrd-release" ]]; then printf "Couldn't temporarily remove /usr bind mount.\n"; fi
+
     exch "$PREFIX/usr" "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
     exch "$PREFIX/etc" "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
+
     mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || printf "Restoring /usr bind mount failed, fs is rw."
     mount -o bind,rw "$PREFIX/usr/local" "$PREFIX/usr/local" || printf "Restoring /usr bind mount failed, fs is rw."
     chattr +i "$PREFIX/" || printf "Couldn't lock /.\n"
-    mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$(cat "${ALD_PATH:?}/current")" || printf "Renaming old deployment failed, naming out of sync."
+
+    swapped_dep="$(cat "${ALD_PATH:?}/current")"
     echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
+    mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$swapped_dep" || printf "Renaming old deployment failed, naming out of sync."
+
     pprint "Locking image storage..."
+    if [[ ! -f "/etc/initrd-release" ]]; then
+        (mountpoint "${ALD_PATH:?}/$swapped_dep/usr/local" &>/dev/null && umount -Rfl "${ALD_PATH:?}/$swapped_dep/usr/local") ||
+            printf "/usr/local might still be mounted to old deployment"
+    fi
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
 
@@ -293,7 +279,7 @@ deduplicate_boot_files() {
     pprint "Deduplicating inactive deployments..."
     read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
-        hardlink -tXOv -s1 "${available_boot_files[@]}"
+    hardlink -tXOv -s1 "${available_boot_files[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
     echo "" > "$locsync"
 }
@@ -301,7 +287,7 @@ deduplicate_boot_files() {
 
 rm_dep() {
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -Rf "${ALD_PATH:?}"
     pprint "Removing deployment $1..."
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
@@ -448,7 +434,10 @@ fi
 
 locsync="/dev/shm/sync$$"
 echo "" > "$locsync"
-draw_bar "$locsync" &
+if [[ "$tput_support" == "y" ]]; then
+    trap clean_draw 0
+    draw_bar "$locsync" &
+fi
 
 declare -A -r RUN_CMD=(
     ["build"]="lwPOgI3J0zn6q"
@@ -538,8 +527,6 @@ if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
 if [[ "$sys_inhibit" == "y" ]]; then
     (systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running.";
 fi
-
-printf "\n"
 
 
 for possible_cmd in "${!RUN_CMD[@]}"; do
