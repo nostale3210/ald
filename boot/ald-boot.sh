@@ -6,7 +6,7 @@ type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
 ald_boot=$(getarg ald.boot)
 [ -z "$ald_boot" ] && exit 0
 
-active_boot=$(cat "/sysroot/.ald/current" 2>/dev/null)
+active_boot=$(cat "/sysroot/usr/.ald_dep" 2>/dev/null)
 [ -z "$active_boot" ] && exit 1
 
 

@@ -9,6 +9,9 @@ on:
     paths:
       - 'boot/**'
       - 'files/**'
+      - 'Containerfile.timesink'
+      - 'librarizer'
+      - '.github/workflows/build-timesink.yml'
   workflow_dispatch:
 
 env:

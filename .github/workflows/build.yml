@@ -8,6 +8,8 @@ on:
       - "main"
     paths:
       - 'files/**'
+      - 'Containerfile'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 env:

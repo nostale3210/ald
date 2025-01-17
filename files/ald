@@ -9,6 +9,15 @@ pprint() {
 }
 
 
+iprint() {
+    if [[ "$tput_support" == "y" ]]; then
+        printf "\e[2K\r%s\n" "$1"
+    else
+        printf "%s\n" "$1"
+    fi
+}
+
+
 clean_draw() {
     echo "" > "$locsync"
     sleep 0.2
@@ -39,7 +48,7 @@ print_help() {
     printf "\thelp\t\tPrint this menu\n"
     printf "\tstatus\t\tPrint active and available deployments and their versions\n"
     printf "\tpull\t\tPull the newest version of the upstream container image, if a new version is available\n"
-    printf "\tbuild\t\tBuild a Containerfile in %s\n" "${ALD_PATH:?}"
+    printf "\tbuild\t\tBuild a Containerfile in /etc/ald\n"
     printf "\tswap\t\tReplace the currently active deployment with another specified, available one\n"
     printf "\trm\t\tRemove a specified, available deployment\n"
     printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
@@ -75,10 +84,12 @@ print_status() {
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
     depl_version="$(grep ^VERSION= < "/usr/lib/os-release" | cut -d'=' -f2)"
     depl_name="$(grep ^NAME= < "/usr/lib/os-release" | cut -d'=' -f2)"
+
     printf "\033[1mCurrently active deployment:\033[0m\n\n"
-    printf "\t\033[1m\033[4m%s\033[0m\t\u2500\u2500\u2500\tName: %s\n" "$(cat "${ALD_PATH:?}/current")" "$depl_name"
+    printf "\t\033[1m\033[4m%s\033[0m\t\u2500\u2500\u2500\tName: %s\n" "$(cat "/usr/.ald_dep")" "$depl_name"
     printf "\t\t\tVersion: %s\n" "$depl_version"
     printf "\t\t\tKernel: \"%s\"\n\n\n" "$(find "/usr/lib/modules" -maxdepth 1 -type d | sort | tail -n1 | awk -F'/' '{ print $NF }')"
+
     printf "\033[1mOther available deployments:\033[0m\n\n"
     for depl in "${available_deployments[@]}"; do
         depl_version="$(grep ^VERSION= < "${ALD_PATH:?}/$depl/usr/lib/os-release" | cut -d'=' -f2)"
@@ -93,7 +104,8 @@ print_status() {
 fail_ex() {
     printf "\n\033[31;1mCritical Failure!\033[0m\n%s\n\n" "$2"
     rm "$locsync" &>/dev/null
-    if [[ ! "$(cat "${ALD_PATH:?}/current")" == "$1" && ! "$1" == "-1" ]]; then
+
+    if [[ ! "$(cat "/usr/.ald_dep")" == "$1" && ! "$1" == "-1" ]]; then
         pprint "Attempting cleanup..."
         podman rm ald-tmp &>/dev/null
         podman rm ald-utils &>/dev/null
@@ -104,6 +116,7 @@ fail_ex() {
         rm -rf "${BOOT_PATH:?}/${1:?}"
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
     fi
+
     mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
     exit 1
@@ -114,8 +127,9 @@ pull_image() {
     pprint "Checking for updates..."
     installed_image="$(podman inspect --format '{{.Digest}}' "$SOURCE_IMAGE" 2>/dev/null)"
     remote_image="$(skopeo inspect --format '{{.Digest}}' "docker://$SOURCE_IMAGE" 2>/dev/null)"
+
     if [[ "$installed_image" == "$remote_image" ]]; then
-        printf "Latest image already pulled.\nIf the invoked command was \`ald dep\` omit \"-u\" to create a new deployment anyways.\n"
+        iprint "Latest image already pulled.\nIf the invoked command was \`ald dep\` omit \"-u\" to create a new deployment anyways.\n"
         exit 0
     else
         pprint "Pulling $SOURCE_IMAGE..."
@@ -140,7 +154,7 @@ setup_dep() {
     if [[ "$*" == "-"*"b"* ]]; then build_image && sleep 1 && SOURCE_IMAGE="$LOCAL_TAG"; fi
 
     pprint "Retrieving vars..."
-    current_id="$(cat "${ALD_PATH:?}/current")"
+    current_id="$(cat "/usr/.ald_dep")"
     max_id="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
     max_id="$(echo "$current_id" "$max_id" | tr " " "\n" | sort -n | tail -n1)"
     next_id="$((max_id+1))"
@@ -160,10 +174,11 @@ setup_dep() {
     mkdir -p "${ALD_PATH:?}/image"
     rsync -aHlcx --delete "$MOUNTC"/{usr,etc} "${ALD_PATH:?}/image" || fail_ex "$next_id" "Couldn't sync files."
     rsync -aHlx "$MOUNTC"/usr/etc/ "${ALD_PATH:?}/image/etc/" &>/dev/null
-    podman unmount ald-tmp &>/dev/null || printf "Temporary container still mounted!\n"
+    podman unmount ald-tmp &>/dev/null || iprint "Temporary container still mounted!\n"
 
     pprint "Creating deployment $next_id..."
     rsync -aHlx --link-dest="../../image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
+    echo "$next_id" > "${ALD_PATH:?}/$next_id/usr/.ald_dep" || iprint "Saving new deployment failed, naming out of sync."
     rsync -aHlx "${ALD_PATH:?}/image/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
 
     pprint "Syncing system configuration..."
@@ -207,19 +222,19 @@ setup_dep() {
 
 show_updates() {
     rpm --version &>/dev/null || fail_ex "-1" "Currently only rpm-based systems are supported."
-    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* && "$1" != "$(cat "${ALD_PATH:?}"/current)" ]]; then
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* && "$1" != "$(cat "/usr/.ald_dep")" ]]; then
         fail_ex "-1" "No such deployment: $1."
-    elif [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$2"* && "$2" != "$(cat "${ALD_PATH:?}"/current)" ]]; then
+    elif [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$2"* && "$2" != "$(cat "/usr/.ald_dep")" ]]; then
         fail_ex "-1" "No such deployment: $2."
     fi
     FALLBACK="$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -n | tail -n1)"
-    if [[ -n "$1" && "$1" != "$(cat "${ALD_PATH:?}/current")" ]]; then OLD_DEP="${ALD_PATH:?}/$1"; else OLD_DEP="${ALD_PATH:?}/$FALLBACK"; fi
-    if [[ -n "$2" && "$2" != "$(cat "${ALD_PATH:?}/current")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
-    printf "Comparing %s and %s:\n" "$OLD_DEP" "$NEW_DEP"
+    if [[ -n "$1" && "$1" != "$(cat "/usr/.ald_dep")" ]]; then OLD_DEP="${ALD_PATH:?}/$1"; else OLD_DEP="${ALD_PATH:?}/$FALLBACK"; fi
+    if [[ -n "$2" && "$2" != "$(cat "/usr/.ald_dep")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
+    iprint "Comparing $OLD_DEP and $NEW_DEP:\n"
     rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || (rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP.")
     rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || (rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP.")
     diff -y "$HOME/.old" "$HOME/.new" | grep "|\|>\|<" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
-    rm "$HOME/"{.old,.new} || printf "Failed to delete temporary files.\n"
+    rm "$HOME/"{.old,.new} || iprint "Failed to delete temporary files.\n"
 }
 
 
@@ -232,26 +247,25 @@ swap_deployment() {
     pprint "Unlocking image storage..."
     mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}" &>/dev/null
 
-    pprint "Replacing deployment $(cat "${ALD_PATH:?}/current") with $1."
-    chattr -i "$PREFIX/" || if [[ ! -f "/etc/initrd-release" ]]; then printf "Couldn't unlock /.\n"; fi
+    pprint "Replacing deployment $(cat "$PREFIX/usr/.ald_dep") with $1."
+    swap_dep="$(cat "$PREFIX/usr/.ald_dep")"
+    chattr -i "$PREFIX/" || if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't unlock /.\n"; fi
     (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rfl "$PREFIX/usr") ||
-        if [[ ! -f "/etc/initrd-release" ]]; then printf "Couldn't temporarily remove /usr bind mount.\n"; fi
+        if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't temporarily remove /usr bind mount.\n"; fi
 
     exch "$PREFIX/usr" "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
-    exch "$PREFIX/etc" "${ALD_PATH:?}/$1/etc" || printf "Couldn't atomically switch system config, system might be instable."
+    exch "$PREFIX/etc" "${ALD_PATH:?}/$1/etc" || iprint "Couldn't atomically switch system config, system might be instable."
 
-    mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || printf "Restoring /usr bind mount failed, fs is rw."
-    mount -o bind,rw "$PREFIX/usr/local" "$PREFIX/usr/local" || printf "Restoring /usr bind mount failed, fs is rw."
-    chattr +i "$PREFIX/" || printf "Couldn't lock /.\n"
+    mount -o bind,ro "$PREFIX/usr" "$PREFIX/usr" || iprint "Restoring /usr bind mount failed, fs is rw."
+    mount -o bind,rw "$PREFIX/usr/local" "$PREFIX/usr/local" || iprint "Restoring /usr bind mount failed, fs is rw."
+    chattr +i "$PREFIX/" || iprint "Couldn't lock /.\n"
 
-    swapped_dep="$(cat "${ALD_PATH:?}/current")"
-    echo "$1" > "${ALD_PATH:?}/current" || printf "Saving new deployment failed, naming out of sync."
-    mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$swapped_dep" || printf "Renaming old deployment failed, naming out of sync."
+    mv "${ALD_PATH:?}/$1" "${ALD_PATH:?}/$swap_dep" || iprint "Renaming old deployment failed, naming out of sync."
 
     pprint "Locking image storage..."
     if [[ ! -f "/etc/initrd-release" ]]; then
-        (mountpoint "${ALD_PATH:?}/$swapped_dep/usr/local" &>/dev/null && umount -Rfl "${ALD_PATH:?}/$swapped_dep/usr/local") ||
-            printf "/usr/local might still be mounted to old deployment"
+        (mountpoint "${ALD_PATH:?}/$swap_dep/usr/local" &>/dev/null && umount -Rfl "${ALD_PATH:?}/$swap_dep/usr/local") ||
+            iprint "/usr/local might still be mounted to old deployment"
     fi
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
@@ -277,7 +291,7 @@ apply_selinux_policy() {
 
 deduplicate_boot_files() {
     pprint "Deduplicating inactive deployments..."
-    read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "${ALD_PATH:?}"/current)" | tr "\n" " ")"
+    read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "/usr/.ald_dep")" | tr "\n" " ")"
     if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
     hardlink -tXOv -s1 "${available_boot_files[@]}"
     if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
@@ -287,15 +301,18 @@ deduplicate_boot_files() {
 
 rm_dep() {
     pprint "Unlocking image storage..."
-    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -Rf "${ALD_PATH:?}"
+    mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}"
+
     pprint "Removing deployment $1..."
     if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
     fi
-    podman rm ald-tmp &>/dev/null
-    rm -rf "${ALD_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$ALD_PATH/$1"
-    rm -rf "${BOOT_PATH:?}/$1" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/$1"
-    rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || printf "Removing %s failed, manual intervention might be necessary.\n" "$BOOT_PATH/loader/entries/$1.conf"
+    mountpoint "${ALD_PATH:?}/$1/usr/local" &>/dev/null && umount -f "${ALD_PATH:?}"
+
+    rm -rf "${ALD_PATH:?}/$1" || iprint "Removing $ALD_PATH/$1 failed, manual intervention might be necessary.\n"
+    rm -rf "${BOOT_PATH:?}/$1" || iprint "Removing $BOOT_PATH/$1 failed, manual intervention might be necessary.\n"
+    rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || iprint "Removing $BOOT_PATH/loader/entries/$1.conf failed, manual intervention might be necessary.\n"
+
     mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
     pprint "Locking image storage..."
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
@@ -314,7 +331,7 @@ init_ald() {
 
     ln -s "${ALD_PATH:?}/ald" /usr/bin/ald
     mkdir -p /var/usrlocal
-    echo "0" > "${ALD_PATH:?}/current"
+    echo "0" > "/usr/.ald_dep"
     boot_conf="$(find "${BOOT_PATH:?}/loader/entries" | sort | tail -n1)"
     if [[ "$*" == *"--ex"* ]]; then
         mv -f "${ALD_PATH:?}/boot.conf.ex" "${ALD_PATH:?}/boot.conf"
@@ -340,7 +357,7 @@ update_bootloader() {
     if [[ "$*" == *"--fg"* ]]; then
         fedora_grub
     else
-        printf "No bootloader seems to be available for this configuration."
+        iprint "No bootloader seems to be available for this configuration."
     fi
 }
 
@@ -377,33 +394,33 @@ EOF
     exch "${EFI_PATH:?}/shimx64.efi" "${EFI_PATH:?}/EFI/BOOT/BOOTX64.EFI" ||
         fail_ex "-1" "Failed to place bootloader components."
     exch "${EFI_PATH:?}/shimx64.efi.bak" "${EFI_PATH:?}/EFI/fedora/shim.efi" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     exch "${EFI_PATH:?}/shimx64.efi.bak.bak" "${EFI_PATH:?}/EFI/fedora/shimx64.efi" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     rm "${EFI_PATH:?}"/{shimx64.efi,shimx64.efi.bak,shimx64.efi.bak.bak} ||
-        printf "Failed to cleanup bootloader components.\n"
+        iprint "Failed to cleanup bootloader components.\n"
 
     pprint "Updating grub..."
     exch "${EFI_PATH:?}/grubx64.efi" "${EFI_PATH:?}/EFI/fedora/grubx64.efi" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     exch "${EFI_PATH:?}/mmx64.efi" "${EFI_PATH:?}/EFI/fedora/mmx64.efi" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     exch "${EFI_PATH:?}/BOOTX64.CSV" "${EFI_PATH:?}/EFI/fedora/BOOTX64.CSV" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     exch "${EFI_PATH:?}/fbx64.efi" "${EFI_PATH:?}/EFI/BOOT/fbx64.efi" ||
-        printf "Failed to place bootloader components.\n"
+        iprint "Failed to place bootloader components.\n"
     rm "${EFI_PATH:?}"/{grubx64.efi,mmx64.efi,BOOTX64.CSV,fbx64.efi} ||
-        printf "Failed to cleanup bootloader components.\n"
+        iprint "Failed to cleanup bootloader components.\n"
 
-    podman rm ald-boot &>/dev/null || printf "Failed to remove container ald-boot.\n"
-    podman rmi localhost/ald-boot &>/dev/null || printf "Failed to remove image localhost/ald-boot.\n"
+    podman rm ald-boot &>/dev/null || iprint "Failed to remove container ald-boot.\n"
+    podman rmi localhost/ald-boot &>/dev/null || iprint "Failed to remove image localhost/ald-boot.\n"
     rm -rf "${ALD_PATH:?}/tmp-boot" &>/dev/null
     pprint "Update complete!\n"
 }
 
 CONFIG_PATH="${CONFIG_PATH:-/etc/ald}"
 
-source "$CONFIG_PATH/ald-config" &>/dev/null || printf "No config found, using defaults...\n"
+source "$CONFIG_PATH/ald-config" &>/dev/null || iprint "No config found, using defaults...\n"
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
