@@ -9,6 +9,7 @@ on:
     paths:
       - 'boot/**'
       - 'files/**'
+      - 'tools/**'
       - 'Containerfile.timesink'
       - 'librarizer'
       - '.github/workflows/build-timesink.yml'

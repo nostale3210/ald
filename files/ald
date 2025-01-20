@@ -165,7 +165,7 @@ sync_image() {
     export -f sync_batch
     export -f fail_ex
     export ALD_PATH
-    find "$MOUNTC"/{usr,etc} ! -type d -print0 | sed -z "s|^\($MOUNTC\)|\1/.|g" | xargs -0 \
+    find "$MOUNTC"/{usr,etc} ! -type d -print0 | shuf -z | sed -z "s|^\($MOUNTC\)|\1/.|g" | xargs -0 \
         -n5000 -P"$(("$(nproc --all)"/2))" bash -c 'sync_batch "$@"' _ &>/dev/null
     unset -f sync_batch
 
@@ -322,13 +322,12 @@ apply_selinux_policy() {
     export -f label_files
     export nextdep
     export ALD_PATH
-    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | xargs -0 -n10000 \
+    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | shuf -z | xargs -0 -n20 \
         -P"$(("$(nproc --all)"/2))" bash -c 'label_files "$@"' _ &>/dev/null
     chcon -t usr_t "${ALD_PATH:?}/$nextdep/usr" &>/dev/null
     chcon -t etc_t "${ALD_PATH:?}/$nextdep/etc" &>/dev/null
     unset -f label_files
     unset nextdep
-
 }
 
 

@@ -5,12 +5,16 @@ COPY boot/90ald /usr/lib/dracut/modules.d/90ald
 COPY boot/ald-boot.service /usr/lib/systemd/system/ald-boot.service
 COPY boot/ald-boot.sh /usr/libexec/ald-boot.sh
 
-COPY librarizer .
+COPY tools/librarizer .
+COPY tools/dep_check .
 
 RUN bash librarizer && \
     sed "/# Dependencies/r drc_libs" /usr/lib/dracut/modules.d/90ald/module-setup.sh && \
     sed -i "/# Dependencies/r drc_libs" /usr/lib/dracut/modules.d/90ald/module-setup.sh && \
-    rm -rf librarizer
+    rm -f librarizer drc_libs
+
+RUN bash dep_check && \
+    rm -f dep_check
 
 RUN chmod +x /usr/bin/ald && \
     chmod +x /usr/libexec/ald-boot.sh
