@@ -313,21 +313,12 @@ apply_selinux_policy() {
     pprint "Relabeling deployment $1..."
     restorecon -RF "${BOOT_PATH:?}"
 
-    label_files() {
-        setfiles -r "${ALD_PATH:?}/$nextdep" \
-            "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" \
-            "$@" &>/dev/null
-    }
+    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | shuf -z | xargs -0 -i \
+        -P"$(("$(nproc --all)"/2))" setfiles -r "${ALD_PATH:?}/$nextdep" \
+        "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" {} &>/dev/null
 
-    export -f label_files
-    export nextdep
-    export ALD_PATH
-    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | shuf -z | xargs -0 -n20 \
-        -P"$(("$(nproc --all)"/2))" bash -c 'label_files "$@"' _ &>/dev/null
     chcon -t usr_t "${ALD_PATH:?}/$nextdep/usr" &>/dev/null
     chcon -t etc_t "${ALD_PATH:?}/$nextdep/etc" &>/dev/null
-    unset -f label_files
-    unset nextdep
 }
 
 
