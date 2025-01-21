@@ -36,9 +36,10 @@ declare -n build_image=build_images
 
 sync_images=(
     "comm:"
+    "nproc:"
     "rsync:"
     "sed:"
-    "shuf:"
+    "sort:"
     "xargs:"
 )
 declare -n sync_image=sync_images
@@ -68,7 +69,8 @@ reset_states=(
 declare -n reset_state=reset_states
 
 apply_se_pols=(
-    "shuf:"
+    "nproc:"
+    "sort:"
     "xargs:"
 )
 declare -n apply_se_pol=apply_se_pols

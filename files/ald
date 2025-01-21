@@ -165,12 +165,14 @@ sync_image() {
     export -f sync_batch
     export -f fail_ex
     export ALD_PATH
-    find "$MOUNTC"/{usr,etc} ! -type d -print0 | shuf -z | sed -z "s|^\($MOUNTC\)|\1/.|g" | xargs -0 \
-        -n5000 -P"$(("$(nproc --all)"/2))" bash -c 'sync_batch "$@"' _ &>/dev/null
+    find "$MOUNTC"/{usr,etc} ! -type d -printf "%s\t%p\0" | sort -znr | cut -z -f2- | \
+        sed -z "s|^\($MOUNTC\)|\1/.|g" | \
+        xargs -0 -n5000 -P"$(("$(nproc --all)"/2))" bash -c 'sync_batch "$@"' _ &>/dev/null
     unset -f sync_batch
 
     comm -z23 <(find "${ALD_PATH:?}/image"/{usr,etc} -print0 | sed -z "s|^${ALD_PATH:?}/image||g" | sort -z) \
-        <(find "$MOUNTC"/{usr,etc} -print0 | sed -z "s|^$MOUNTC||g" | sort -z) | sed -z "s|^|${ALD_PATH:?}/image|g" | xargs -0 rm -rf &>/dev/null
+        <(find "$MOUNTC"/{usr,etc} -print0 | sed -z "s|^$MOUNTC||g" | sort -z) | \
+        sed -z "s|^|${ALD_PATH:?}/image|g" | xargs -0 rm -rf &>/dev/null
 }
 
 
@@ -313,8 +315,8 @@ apply_selinux_policy() {
     pprint "Relabeling deployment $1..."
     restorecon -RF "${BOOT_PATH:?}"
 
-    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | shuf -z | xargs -0 -i \
-        -P"$(("$(nproc --all)"/2))" setfiles -r "${ALD_PATH:?}/$nextdep" \
+    find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | sort -zr | \
+        xargs -0 -I{} -P"$(("$(nproc --all)"/2))" setfiles -r "${ALD_PATH:?}/$nextdep" \
         "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" {} &>/dev/null
 
     chcon -t usr_t "${ALD_PATH:?}/$nextdep/usr" &>/dev/null
