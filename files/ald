@@ -117,7 +117,7 @@ fail_ex() {
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
     fi
 
-    mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
+    mountpoint /usr &>/dev/null || { mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local; }
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
     unset ALD_PATH &>/dev/null
     unset -f fail_ex &>/dev/null
@@ -258,8 +258,8 @@ show_updates() {
     if [[ -n "$1" && "$1" != "$(cat "/usr/.ald_dep")" ]]; then OLD_DEP="${ALD_PATH:?}/$1"; else OLD_DEP="${ALD_PATH:?}/$FALLBACK"; fi
     if [[ -n "$2" && "$2" != "$(cat "/usr/.ald_dep")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
     iprint "Comparing $OLD_DEP and $NEW_DEP:"
-    rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || (rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP.")
-    rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || (rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP.")
+    rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || { rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP."; }
+    rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || { rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP."; }
     diff -y "$HOME/.old" "$HOME/.new" | grep "|\|>\|<" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
     rm "$HOME/"{.old,.new} || iprint "Failed to delete temporary files."
 }
@@ -277,7 +277,7 @@ swap_deployment() {
     pprint "Replacing deployment $(cat "$PREFIX/usr/.ald_dep") with $1."
     swap_dep="$(cat "$PREFIX/usr/.ald_dep")"
     chattr -i "$PREFIX/" || if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't unlock /."; fi
-    (mountpoint "$PREFIX/usr" &>/dev/null && umount -Rfl "$PREFIX/usr") ||
+    { mountpoint "$PREFIX/usr" &>/dev/null && umount -Rfl "$PREFIX/usr"; } ||
         if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't temporarily remove /usr bind mount."; fi
 
     exch "$PREFIX/usr" "${ALD_PATH:?}/$1/usr" || fail_ex "-1" "Couldn't atomically switch deployments."  
@@ -291,8 +291,8 @@ swap_deployment() {
 
     pprint "Locking image storage..."
     if [[ ! -f "/etc/initrd-release" ]]; then
-        mountpoint "${ALD_PATH:?}/$swap_dep/usr/local" &>/dev/null && (umount -fl "${ALD_PATH:?}/$swap_dep/usr/local" ||
-            iprint "/usr/local might still be mounted to old deployment")
+        mountpoint "${ALD_PATH:?}/$swap_dep/usr/local" &>/dev/null && { umount -fl "${ALD_PATH:?}/$swap_dep/usr/local" ||
+            iprint "/usr/local might still be mounted to old deployment"; }
     fi
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
@@ -348,7 +348,7 @@ rm_dep() {
     rm -rf "${BOOT_PATH:?}/$1" || iprint "Removing $BOOT_PATH/$1 failed, manual intervention might be necessary."
     rm -rf "${BOOT_PATH:?}/loader/entries/$1.conf" || iprint "Removing $BOOT_PATH/loader/entries/$1.conf failed, manual intervention might be necessary."
 
-    mountpoint /usr &>/dev/null || (mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local)
+    mountpoint /usr &>/dev/null || { mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local; }
     pprint "Locking image storage..."
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
 }
@@ -372,11 +372,11 @@ init_ald() {
         mv -f "${ALD_PATH:?}/boot.conf.ex" "${ALD_PATH:?}/boot.conf"
     else
         cp -fa "$boot_conf" "${ALD_PATH:?}/boot.conf" || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q title "${ALD_PATH:?}/boot.conf" && sed -i "s/^title .*$/title ALD Deployment INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q version "${ALD_PATH:?}/boot.conf" && sed -i "s/^version .*$/version INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q linux "${ALD_PATH:?}/boot.conf" && sed -i "s/^linux .*$/linux \/INSERT_DEPLOYMENT\/vmlinuz/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q initrd "${ALD_PATH:?}/boot.conf" && sed -i "s/^initrd .*$/initrd \/INSERT_DEPLOYMENT\/initramfs.img/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
-        (grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 ald.boot=INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf") || fail_ex "-1" "Automatic boot entry creation failed."
+        { grep -q title "${ALD_PATH:?}/boot.conf" && sed -i "s/^title .*$/title ALD Deployment INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
+        { grep -q version "${ALD_PATH:?}/boot.conf" && sed -i "s/^version .*$/version INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
+        { grep -q linux "${ALD_PATH:?}/boot.conf" && sed -i "s/^linux .*$/linux \/INSERT_DEPLOYMENT\/vmlinuz/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
+        { grep -q initrd "${ALD_PATH:?}/boot.conf" && sed -i "s/^initrd .*$/initrd \/INSERT_DEPLOYMENT\/initramfs.img/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
+        { grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 ald.boot=INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
     fi
 
     if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
@@ -402,9 +402,9 @@ fedora_grub() {
     cat > "${ALD_PATH:?}/tmp-boot/Containerfile" << EOF
 FROM "${SOURCE_IMAGE}"
 
-RUN (sudo dnf5 reinstall -y grub2-efi-x64.x86_64 || sudo dnf5 install -y grub2-efi-x64.x86_64) || (echo "Couldn't install grub!" && exit 1)
+RUN { sudo dnf5 reinstall -y grub2-efi-x64.x86_64 || sudo dnf5 install -y grub2-efi-x64.x86_64 } || { echo "Couldn't install grub!" && exit 1 }
 
-RUN (dnf5 reinstall -y shim-x64.x86_64 || sudo dnf5 install -y shim-x64.x86_64) || (echo "Couldn't install shim!" && exit 1)
+RUN { dnf5 reinstall -y shim-x64.x86_64 || sudo dnf5 install -y shim-x64.x86_64 } || { echo "Couldn't install shim!" && exit 1 }
 EOF
     podman build -t localhost/ald-boot "${ALD_PATH:?}/tmp-boot" || fail_ex "-1" "Couldn't create image."
     podman create --name ald-boot localhost/ald-boot &>/dev/null || fail_ex "-1" "Couldn't sync files."
@@ -465,7 +465,7 @@ EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
 STATE="${ALD_STATE:-keep}"
 KEEP_DEPS="${KEEP_DEPS:-4}"
 
-if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH"; fi
+if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH" && PREFIX="/sysroot"; fi
 
 dependency_check() {
     if ! podman --version &>/dev/null || ! rsync --version &>/dev/null; then
@@ -576,15 +576,14 @@ fi
 
 if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
 
-if [[ "$sys_inhibit" == "y" ]]; then
-    (systemd-inhibit --list | grep -q ALD) && fail_ex "-1" "ALD is already running.";
-fi
-
+set -e
+if [[ ! -f "$PREFIX$CONFIG_PATH/.ald.lock" ]]; then touch "$PREFIX$CONFIG_PATH/.ald.lock"; fi
+exec {ALD_LOCK}<>"$PREFIX$CONFIG_PATH/.ald.lock" || fail_ex "-1" "Couldn't set lock fd."
+printf "\e[2K\rWaiting to acquire lock..." && flock -x "$ALD_LOCK" && printf "\e[2K\r"
 
 for possible_cmd in "${!RUN_CMD[@]}"; do
     if [[ "$1" == "$possible_cmd" ]]; then
         shift
-        set -e
         if [[ "$sys_inhibit" == "y" ]]; then
             systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
                 ald "${RUN_CMD[$possible_cmd]}" "$@"

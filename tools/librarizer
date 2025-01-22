@@ -2,13 +2,21 @@
 set -oue pipefail
 
 bins=(
-    "exch"
+    "bash"
+    "cat"
     "chattr"
+    "dirname"
+    "echo"
+    "exch"
     "find"
+    "flock"
+    "id"
     "mount"
     "mountpoint"
-    "dirname"
-    "id"
+    "mv"
+    "printf"
+    "rm"
+    "umount"
 )
 
 libs=()
