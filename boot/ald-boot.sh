@@ -7,7 +7,7 @@ ald_boot=$(getarg ald.boot)
 [ -z "$ald_boot" ] && exit 0
 
 active_boot=$(cat "/sysroot/usr/.ald_dep" 2>/dev/null)
-[ -z "$active_boot" ] && exit 1
+[ -z "$active_boot" ] && printf "Couldn't determine active deployment. Dirty Switch!\n"
 
 
 [ "$active_boot" = "$ald_boot" ] && \

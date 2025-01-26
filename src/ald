@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+
+
+if [[ -d /usr/lib/ald ]]; then
+    for func in /usr/lib/ald/*; do
+        if [[ -f "$func" ]]; then
+            source "$func"
+        fi
+    done
+else
+    printf "Couldn't load function definitions from /usr/lib/ald!\n" && exit 1
+fi
+
+
+CONFIG_PATH="${CONFIG_PATH:-/etc/ald}"
+
+source "$CONFIG_PATH/ald-config" &>/dev/null || iprint "No config found, using defaults..."
+
+SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
+LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
+ALD_PATH="${ALD_PATH:-/.ald}"
+BOOT_PATH="${BOOT_PATH:-/boot}"
+EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
+STATE="${ALD_STATE:-keep}"
+KEEP_DEPS="${KEEP_DEPS:-4}"
+
+if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH" && PREFIX="/sysroot"; fi
+
+dependency_check() {
+    if ! podman --version &>/dev/null || ! rsync --version &>/dev/null; then
+        fail_ex "-1" "Dependency check failed! Are podman and rsync installed?"
+    fi
+}
+
+if (infocmp 2>/dev/null | grep -q smcup) &&
+    (infocmp 2>/dev/null | grep -q rmcup); then
+    tput_support="y";
+else
+    tput_support="n";
+fi
+
+if systemd-inhibit --help &>/dev/null; then
+    sys_inhibit="y";
+fi
+
+locsync="/dev/shm/sync$$"
+echo "" > "$locsync"
+if [[ "$tput_support" == "y" ]]; then
+    trap clean_draw 0
+    draw_bar "$locsync" &
+fi
+
+declare -A -r RUN_CMD=(
+    ["build"]="lwPOgI3J0zn6q"
+    ["pull"]="SPRjLFOXJvXt7"
+    ["swap"]="NJsoQnUMHEfpe"
+    ["dep"]="nQ8tKSuA0SJoy"
+    ["rm"]="ONK3quF6NgVfC"
+    ["gc"]="fM2KhAo1Ko0Pk"
+    ["dedupe"]="29UtiseMD5Vji"
+    ["self-update"]="QUd1eE2e8cEdn"
+    ["bootloader-update"]="QjPZu7VH36P6n"
+)
+
+if [[ "$(id -u)" != "0" ]]; then
+    case "$1" in
+        help)
+            print_help
+            ;;
+        status)
+            print_status
+            ;;
+        diff)
+            show_updates "${2-}" "${3-}"
+            ;;
+        *)
+            printf "\033[31;1mThis program needs to be ran as root.\nMore info:\033[0m\n\n"
+            print_help
+            exit 1
+            ;;
+    esac
+elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
+    case "$1" in
+        lwPOgI3J0zn6q)
+            dependency_check
+            build_image
+            ;;
+        SPRjLFOXJvXt7)
+            dependency_check
+            pull_image
+            ;;
+        NJsoQnUMHEfpe)
+            swap_deployment "$2" "${3-}"
+            ;;
+        nQ8tKSuA0SJoy)
+            dependency_check
+            setup_dep "$@"
+            ;;
+        ONK3quF6NgVfC)
+            rm_dep "$2"
+            ;;
+        init)
+            dependency_check
+            init_ald "$@"
+            ;;
+        fM2KhAo1Ko0Pk)
+            rm_deps
+            ;;
+        29UtiseMD5Vji)
+            deduplicate_boot_files
+            ;;
+        QUd1eE2e8cEdn)
+            dependency_check
+            update_ald "${2-}"
+            ;;
+        QjPZu7VH36P6n)
+            dependency_check
+            update_bootloader "$@"
+            ;;
+        diff)
+            show_updates "${2-}" "${3-}"
+            ;;
+        status)
+            print_status
+            ;;
+        help)
+            print_help
+            ;;
+        *)
+            printf "\033[31;1mUnrecognized command.\nMore info:\033[0m\n\n"
+            print_help
+            ;;
+    esac
+fi
+
+if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
+
+set -e
+if [[ ! -f "$PREFIX$CONFIG_PATH/.ald.lock" ]]; then touch "$PREFIX$CONFIG_PATH/.ald.lock"; fi
+exec {ALD_LOCK}<>"$PREFIX$CONFIG_PATH/.ald.lock" || fail_ex "-1" "Couldn't set lock fd."
+iprint "Waiting to acquire lock..." && flock -x "$ALD_LOCK"
+
+for possible_cmd in "${!RUN_CMD[@]}"; do
+    if [[ "$1" == "$possible_cmd" ]]; then
+        shift
+        if [[ "$sys_inhibit" == "y" ]]; then
+            systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
+                ald "${RUN_CMD[$possible_cmd]}" "$@"
+        else
+            ald "${RUN_CMD[$possible_cmd]}" "$@"
+        fi
+        unset ALD_PATH &>/dev/null
+        unset -f fail_ex &>/dev/null
+        exit 0
+    fi
+done

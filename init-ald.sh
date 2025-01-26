@@ -17,15 +17,18 @@ podman cp "$(podman create --name ald-tmp ghcr.io/nostale3210/ald-utils:latest)"
     (printf "Installing needed files failed!\n" && exit 1)
 podman rm ald-tmp
 
+mv "${ALD_PATH:?}/ald" "/usr/bin/ald"
+mv "${ALD_PATH:?}/lib" "/usr/lib/ald"
+mv "${ALD_PATH:?}/Containerfile" "${CONFIG_PATH:?}"
+mv "${ALD_PATH:?}/ald-config" "${CONFIG_PATH:?}"
+
 read -rp "Is this system using selinux (enforcing)? [y/N] " use_selinux
 if [ "$use_selinux" = "y" ]; then FLAGS+=(-z); fi
 
 read -rp "Edit and build local containerfile? [y/N] " use_local
-if [ "$use_local" = "y" ]; then FLAGS+=(-b) && "${EDITOR:-nano}" "${ALD_PATH:?}/Containerfile" &&
-    mv "${ALD_PATH:?}/Containerfile" "${CONFIG_PATH:?}"; fi
+if [ "$use_local" = "y" ]; then FLAGS+=(-b) && "${EDITOR:-nano}" "${CONFIG_PATH:?}/Containerfile"; fi
 
 read -rp "Edit configuration file before installation? [y/N] " edit_file
-if [ "$edit_file" = "y" ]; then "${EDITOR:-nano}" "${ALD_PATH:?}/ald-config" &&
-    mv "${ALD_PATH:?}/ald-config" "${CONFIG_PATH:?}"; fi
+if [ "$edit_file" = "y" ]; then "${EDITOR:-nano}" "${ALD_PATH:?}/ald-config"; fi
 
-"${ALD_PATH:?}/ald" init "${FLAGS[@]}"
+/usr/bin/ald init "${FLAGS[@]}"
