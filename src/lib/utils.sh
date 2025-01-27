@@ -61,8 +61,6 @@ fail_ex() {
 
     mountpoint /usr &>/dev/null || { mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local; }
     mountpoint "${ALD_PATH:?}" &>/dev/null || mount -o bind,ro "${ALD_PATH:?}" "${ALD_PATH:?}"
-    unset ALD_PATH &>/dev/null
-    unset -f fail_ex &>/dev/null
     exit 1
 }
 

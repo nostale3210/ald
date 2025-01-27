@@ -7,7 +7,8 @@ rm_dep() {
 
     pprint "Removing deployment $1..."
     if [[ -z $1 || "$(cat /usr/.ald_dep)" == "$1" ||
-        "$(find "${ALD_PATH:?}" -maxdepth 1 -type f -name ".[0-9]*" -printf "%P " | sed "s/\.//g")" != *"$1"* ]];
+        "$(find "${ALD_PATH:?}" -maxdepth 1 -type f -name ".[0-9]*" -printf " %P " | \
+        sed "s/\.//g")" != *" $1 "* ]];
         then
             fail_ex "-1" "Deployment $1 doesn't exist or isn't removable."
     fi
@@ -28,11 +29,9 @@ rm_dep() {
 rm_deps() {
     read -ra av_deps <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type f -name ".[0-9]*" -printf "%P " | sed "s/\.//g")"
     for av in "${av_deps[@]}"; do
-        if [[ ( -d "${ALD_PATH:?}/$av" || "$(cat /usr/.ald_dep)" == "$av" ) &&
-            -d "${BOOT_PATH:?}/$av" && -f "${BOOT_PATH:?}/loader/entries/$av.conf" ]];
+        if [[ ( ! -d "${ALD_PATH:?}/$av" && "$(cat /usr/.ald_dep)" != "$av" ) ||
+            ! -d "${BOOT_PATH:?}/$av" || ! -f "${BOOT_PATH:?}/loader/entries/$av.conf" ]];
                 then
-                    :
-                else
                     rm_dep "$av"
         fi
     done

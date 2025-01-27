@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 
 
+if systemd-inhibit --who="ald" --what="idle" sleep 0.01 &>/dev/null && [[ "$(id -u)" == "0" ]]; then
+    if ! { systemd-inhibit --list | grep -q ald-rootful-ops ; }; then
+        set -e
+        systemd-inhibit --what="idle:sleep:shutdown" --who="ald-rootful-ops" \
+            --why="Doing important stuff" -- ald "$@"
+        exit 0
+    fi
+fi
+
+
+if [[ "$*" == *"--init"* ]]; then
+    declare -xgr PREFIX="${*: -1}"
+else
+    declare -xgr PREFIX=""
+fi
+
+declare -xgr ALD_PATH="$PREFIX/.ald"
+declare -xgr CONFIG_PATH="$PREFIX${CONFIG_PATH:-/etc/ald}"
+
+
 if [[ -d /usr/lib/ald ]]; then
     for func in /usr/lib/ald/*; do
         if [[ -f "$func" ]]; then
@@ -12,51 +32,41 @@ else
 fi
 
 
-CONFIG_PATH="${CONFIG_PATH:-/etc/ald}"
+if [[ "$(id -u)" == "0" ]]; then
+    [[ ! -f "${CONFIG_PATH:?}/.ald.lock" ]] && \
+        mkdir -p "$CONFIG_PATH" && touch "${CONFIG_PATH:?}/.ald.lock"
+
+    if (infocmp 2>/dev/null | grep -q smcup) &&
+        (infocmp 2>/dev/null | grep -q rmcup); then
+            declare -xgr tput_support="y";
+        else
+            declare -xgr tput_support="n";
+    fi
+
+    if [[ "$tput_support" == "y" ]]; then
+        locsync="/dev/shm/sync$$"
+        echo "" > "$locsync"
+        trap clean_draw EXIT
+        draw_bar "$locsync" &
+    fi
+
+    exec {ALD_LOCK}<>"${CONFIG_PATH:?}/.ald.lock" || \
+        { fail_ex "-1" "Couldn't set lock fd." ; }
+
+    pprint "Acquiring lock..."
+    flock -x "$ALD_LOCK"
+fi
+
 
 source "$CONFIG_PATH/ald-config" &>/dev/null || iprint "No config found, using defaults..."
 
-SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
-LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
-ALD_PATH="/.ald"
-BOOT_PATH="${BOOT_PATH:-/boot}"
-EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
-STATE="${ALD_STATE:-keep}"
-KEEP_DEPS="${KEEP_DEPS:-4}"
+declare -xg SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
+declare -xgr LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
+declare -xgr BOOT_PATH="${BOOT_PATH:-/boot}"
+declare -xgr EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
+declare -xg STATE="${ALD_STATE:-keep}"
+declare -xgr KEEP_DEPS="${KEEP_DEPS:-4}"
 
-if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH" && PREFIX="/sysroot"; fi
-
-if (infocmp 2>/dev/null | grep -q smcup) &&
-    (infocmp 2>/dev/null | grep -q rmcup); then
-    tput_support="y";
-else
-    tput_support="n";
-fi
-
-if systemd-inhibit --what="idle" sleep 0.01 &>/dev/null; then
-    sys_inhibit="y";
-fi
-
-locsync="/dev/shm/sync$$"
-echo "" > "$locsync"
-if [[ "$tput_support" == "y" ]]; then
-    trap clean_draw EXIT
-    draw_bar "$locsync" &
-fi
-
-declare -A -r RUN_CMD=(
-    ["build"]="lwPOgI3J0zn6q"
-    ["pull"]="SPRjLFOXJvXt7"
-    ["swap"]="NJsoQnUMHEfpe"
-    ["dep"]="nQ8tKSuA0SJoy"
-    ["rm"]="ONK3quF6NgVfC"
-    ["gc"]="fM2KhAo1Ko0Pk"
-    ["dedupe"]="29UtiseMD5Vji"
-    ["self-update"]="QUd1eE2e8cEdn"
-    ["bootloader-update"]="QjPZu7VH36P6n"
-    ["hash"]="h7SNDYGPx7pme"
-    ["verify"]="FzmClobN0RKMf"
-)
 
 if [[ "$(id -u)" != "0" ]]; then
     case "$1" in
@@ -75,43 +85,42 @@ if [[ "$(id -u)" != "0" ]]; then
             exit 1
             ;;
     esac
-elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
+else
     case "$1" in
-        lwPOgI3J0zn6q)
+        build)
             build_image
             ;;
-        SPRjLFOXJvXt7)
+        pull)
             pull_image
             ;;
-        NJsoQnUMHEfpe)
-            swap_deployment "${2-}" "${3-}"
+        swap)
+            swap_deployment "${2-}"
             ;;
-        nQ8tKSuA0SJoy)
+        dep)
             setup_dep "$@"
             ;;
-        ONK3quF6NgVfC)
+        rm)
             rm_dep "${2-}"
             ;;
         init)
-            dependency_check
             init_ald "$@"
             ;;
-        fM2KhAo1Ko0Pk)
+        gc)
             rm_deps
             ;;
-        29UtiseMD5Vji)
+        dedupe)
             deduplicate_boot_files
             ;;
-        QUd1eE2e8cEdn)
+        self-update)
             update_ald "${2-}"
             ;;
-        QjPZu7VH36P6n)
+        bootloader-update)
             update_bootloader "$@"
             ;;
-        h7SNDYGPx7pme)
+        hash)
             hash_usr
             ;;
-        FzmClobN0RKMf)
+        verify)
             verify_usr "${2-}"
             ;;
         diff)
@@ -129,25 +138,3 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             ;;
     esac
 fi
-
-if [[ "${!RUN_CMD[*]}" != *"$1"* ]]; then exit 0; fi
-
-set -e
-if [[ ! -f "$PREFIX$CONFIG_PATH/.ald.lock" ]]; then touch "$PREFIX$CONFIG_PATH/.ald.lock"; fi
-exec {ALD_LOCK}<>"$PREFIX$CONFIG_PATH/.ald.lock" || fail_ex "-1" "Couldn't set lock fd."
-iprint "Waiting to acquire lock..." && flock -x "$ALD_LOCK"
-
-for possible_cmd in "${!RUN_CMD[@]}"; do
-    if [[ "$1" == "$possible_cmd" ]]; then
-        shift
-        if [[ "$sys_inhibit" == "y" ]]; then
-            systemd-inhibit --what="idle:sleep:shutdown" --who="ALD" --why="Modifying/Creating deployments..." \
-                ald "${RUN_CMD[$possible_cmd]}" "$@"
-        else
-            ald "${RUN_CMD[$possible_cmd]}" "$@"
-        fi
-        unset ALD_PATH &>/dev/null
-        unset -f fail_ex &>/dev/null
-        exit 0
-    fi
-done

@@ -2,9 +2,7 @@
 
 
 swap_deployment() {
-    PREFIX=""
-    if [[ -f "/etc/initrd-release" ]]; then PREFIX="/sysroot"; fi
-    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name ".[0-9]*" -printf "%P ")" != *"$1"* || -z $1 ]]; then
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -printf " %P ")" != *" $1 "* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
@@ -12,6 +10,7 @@ swap_deployment() {
 
     pprint "Replacing deployment $(cat "$PREFIX/usr/.ald_dep") with $1."
     swap_dep="$(cat "$PREFIX/usr/.ald_dep")"
+
     chattr -i "$PREFIX/" || if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't unlock /."; fi
     { mountpoint "$PREFIX/usr" &>/dev/null && umount -Rfl "$PREFIX/usr"; } ||
         if [[ ! -f "/etc/initrd-release" ]]; then iprint "Couldn't temporarily remove /usr bind mount."; fi

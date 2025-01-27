@@ -11,7 +11,7 @@ OnFailureJobMode=isolate
 
 [Service]
 Type=oneshot
-ExecStart=/usr/libexec/ald-boot.sh
+ExecStart=/usr/libexec/ald-boot.sh /sysroot
 StandardInput=null
 StandardOutput=journal
 StandardError=journal+console

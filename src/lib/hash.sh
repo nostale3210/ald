@@ -24,8 +24,8 @@ hash_usr() {
 verify_usr() {
     dep="$1"
 
-    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name ".[0-9]*" -printf "%P ")" != *"$dep"* ||
-        -z $1 || "$(cat /usr/.ald_dep)" != "$dep" ]]; then
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name ".[0-9]*" -printf " %P ")" != *" $dep "* &&
+        -z $1 && "$(cat /usr/.ald_dep)" != "$dep" ]]; then
             fail_ex "-1" "Deployment $dep doesn't seem to exist."
     fi
 
