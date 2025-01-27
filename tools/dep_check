@@ -125,6 +125,7 @@ funcs=(
 
 optionals=(
     "chcon:"
+    "cksum:"
     "diff:"
     "dnf:"
     "man:restorecon"

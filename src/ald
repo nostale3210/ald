@@ -54,6 +54,8 @@ declare -A -r RUN_CMD=(
     ["dedupe"]="29UtiseMD5Vji"
     ["self-update"]="QUd1eE2e8cEdn"
     ["bootloader-update"]="QjPZu7VH36P6n"
+    ["hash"]="h7SNDYGPx7pme"
+    ["verify"]="FzmClobN0RKMf"
 )
 
 if [[ "$(id -u)" != "0" ]]; then
@@ -82,13 +84,13 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             pull_image
             ;;
         NJsoQnUMHEfpe)
-            swap_deployment "$2" "${3-}"
+            swap_deployment "${2-}" "${3-}"
             ;;
         nQ8tKSuA0SJoy)
             setup_dep "$@"
             ;;
         ONK3quF6NgVfC)
-            rm_dep "$2"
+            rm_dep "${2-}"
             ;;
         init)
             dependency_check
@@ -105,6 +107,12 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             ;;
         QjPZu7VH36P6n)
             update_bootloader "$@"
+            ;;
+        h7SNDYGPx7pme)
+            hash_usr
+            ;;
+        FzmClobN0RKMf)
+            verify_usr "${2-}"
             ;;
         diff)
             show_updates "${2-}" "${3-}"

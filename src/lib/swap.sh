@@ -4,7 +4,7 @@
 swap_deployment() {
     PREFIX=""
     if [[ -f "/etc/initrd-release" ]]; then PREFIX="/sysroot"; fi
-    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -printf "%P ")" != *"$1"* || -z $1 ]]; then
+    if [[ "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name ".[0-9]*" -printf "%P ")" != *"$1"* || -z $1 ]]; then
         fail_ex "-1" "Deployment $1 doesn't exist or can't be swapped to."
     fi
     pprint "Unlocking image storage..."
