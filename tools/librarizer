@@ -25,8 +25,11 @@ for bin in "${bins[@]}"; do
         sed "s/^\s*//" | tr "\n" " ")"
     libs+=( "${tl[@]}" )
 done
-echo "$(tr " " "\n" <<< "${libs[@]}" | sort -u | sed "s/^\(.*\)/dracut_install \1/" &&
-printf "\n" &&
-tr " " "\n" <<< "${bins[@]}" | sort -u |
-    sed "s/^\(.*\)/dracut_install \/usr\/bin\/\1/")" |
-    sed "s/^\(.*\)/    \1/" > drc_libs
+
+inst_mult_arr() {
+    local -n arr="$1"
+    printf "%s\n" "$(printf "%s\n" "${arr[@]}" | sort -u | sed "s/^/inst /")"
+}
+
+printf "%s\n\n%s\n" "$(inst_mult_arr libs)" \
+    "$(inst_mult_arr bins)" | sed "s/^/    /" > drc_libs
