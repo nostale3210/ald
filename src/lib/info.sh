@@ -1,4 +1,4 @@
-#!/usr/bin/env
+#!/usr/bin/env bash
 
 
 print_help() {
@@ -44,6 +44,8 @@ print_status() {
     read -ra available_deployments <<< "$(find "${ALD_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" | awk -F'/' '{print $NF}' | sort -nr | tr "\n" " ")"
     depl_version="$(grep ^VERSION= < "/usr/lib/os-release" | cut -d'=' -f2)"
     depl_name="$(grep ^NAME= < "/usr/lib/os-release" | cut -d'=' -f2)"
+    lock_files="$(find "${ALD_PATH:?}" -maxdepth 1 -type f -name ".[0-9]*" -printf "%P\n" | \
+        sed "s/\.//g" | sort -n | tr "\n" " ")"
 
     printf "\033[1mCurrently active deployment:\033[0m\n\n"
     printf "\t\033[1m\033[4m%s\033[0m\t\u2500\u2500\u2500\tName: %s\n" "$(cat "/usr/.ald_dep")" "$depl_name"
@@ -58,6 +60,7 @@ print_status() {
         printf "\t\t\tVersion: %s\n" "$depl_version"
         printf "\t\t\tKernel: \"%s\"\n\n" "$(find "${ALD_PATH:?}/$depl/usr/lib/modules" -maxdepth 1 -type d | sort | tail -n1 | awk -F'/' '{ print $NF }')"
     done
+    printf "Retained lock files: %s\n" "$lock_files"
 }
 
 

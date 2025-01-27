@@ -44,7 +44,6 @@ draw_bar() {
 
 fail_ex() {
     printf "\n\033[31;1mCritical Failure!\033[0m\n%s\n\n" "$2"
-    rm "$locsync" &>/dev/null
 
     if [[ ! "$(cat "/usr/.ald_dep")" == "$1" && ! "$1" == "-1" ]]; then
         pprint "Attempting cleanup..."
@@ -56,6 +55,8 @@ fail_ex() {
         rm -rf "${ALD_PATH:?}/init/${1:?}.sh"
         rm -rf "${BOOT_PATH:?}/${1:?}"
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
+
+        rm -rf "${ALD_PATH:?}/.${1:?}"
     fi
 
     mountpoint /usr &>/dev/null || { mount -o bind,ro /usr /usr && mount -o bind,rw /usr/local /usr/local; }
@@ -71,13 +72,6 @@ apply_selinux_policy() {
 
     pprint "Relabeling deployment $1..."
     restorecon -RF "${BOOT_PATH:?}"
-
-    # find "${ALD_PATH:?}/$nextdep" -mindepth 2 -maxdepth 2 -print0 | sort -zr | \
-    #     xargs -0 -I{} -P"$(("$(nproc --all)"/2))" setfiles -r "${ALD_PATH:?}/$nextdep" \
-    #     "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" {} &>/dev/null
-
-    # chcon -t usr_t "${ALD_PATH:?}/$nextdep/usr" &>/dev/null
-    # chcon -t etc_t "${ALD_PATH:?}/$nextdep/etc" &>/dev/null
 
     setfiles -T "$(("$(nproc --all)"/2))" -r "${ALD_PATH:?}/$nextdep" \
         "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" \

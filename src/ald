@@ -18,19 +18,13 @@ source "$CONFIG_PATH/ald-config" &>/dev/null || iprint "No config found, using d
 
 SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
 LOCAL_TAG="${LOCAL_TAG:-localhost/ald-root}"
-ALD_PATH="${ALD_PATH:-/.ald}"
+ALD_PATH="/.ald"
 BOOT_PATH="${BOOT_PATH:-/boot}"
 EFI_PATH="${EFI_PATH:-$BOOT_PATH/efi}"
 STATE="${ALD_STATE:-keep}"
 KEEP_DEPS="${KEEP_DEPS:-4}"
 
 if [[ -f "/etc/initrd-release" ]]; then ALD_PATH="/sysroot$ALD_PATH" && PREFIX="/sysroot"; fi
-
-dependency_check() {
-    if ! podman --version &>/dev/null || ! rsync --version &>/dev/null; then
-        fail_ex "-1" "Dependency check failed! Are podman and rsync installed?"
-    fi
-}
 
 if (infocmp 2>/dev/null | grep -q smcup) &&
     (infocmp 2>/dev/null | grep -q rmcup); then
@@ -39,14 +33,14 @@ else
     tput_support="n";
 fi
 
-if systemd-inhibit --help &>/dev/null; then
+if systemd-inhibit --what="idle" sleep 0.01 &>/dev/null; then
     sys_inhibit="y";
 fi
 
 locsync="/dev/shm/sync$$"
 echo "" > "$locsync"
 if [[ "$tput_support" == "y" ]]; then
-    trap clean_draw 0
+    trap clean_draw EXIT
     draw_bar "$locsync" &
 fi
 
@@ -82,18 +76,15 @@ if [[ "$(id -u)" != "0" ]]; then
 elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
     case "$1" in
         lwPOgI3J0zn6q)
-            dependency_check
             build_image
             ;;
         SPRjLFOXJvXt7)
-            dependency_check
             pull_image
             ;;
         NJsoQnUMHEfpe)
             swap_deployment "$2" "${3-}"
             ;;
         nQ8tKSuA0SJoy)
-            dependency_check
             setup_dep "$@"
             ;;
         ONK3quF6NgVfC)
@@ -110,11 +101,9 @@ elif [[ "$(id -u)" = "0" && "${!RUN_CMD[*]}" != *"$1"* ]]; then
             deduplicate_boot_files
             ;;
         QUd1eE2e8cEdn)
-            dependency_check
             update_ald "${2-}"
             ;;
         QjPZu7VH36P6n)
-            dependency_check
             update_bootloader "$@"
             ;;
         diff)

@@ -3,7 +3,6 @@
 
 # SOURCE_IMAGE=ghcr.io/nostale3210/timesinkc-main:latest
 # LOCAL_TAG=localhost/ald-root
-# ALD_PATH=/.ald
 # BOOT_PATH=/boot
 # EFI_PATH="$BOOT_PATH/efi"
 # STATE=keep

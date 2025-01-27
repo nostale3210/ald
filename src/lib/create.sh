@@ -12,6 +12,15 @@ get_id() {
 create_deployment() {
     next_id="$1"
 
+    podman cp -a ald-tmp:/files "${ALD_PATH:?}/.$next_id" &>/dev/null || { iprint "No file list found. Skipping..." &&
+        { touch "${ALD_PATH:?}/.$next_id" ||
+            fail_ex "$next_id" "Couldn't create lockfile for deployment $next_id."
+        }
+    }
+
+    mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
+    mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
+
     pprint "Creating deployment $next_id..."
     rsync -aHlx --link-dest="../../image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
     echo "$next_id" > "${ALD_PATH:?}/$next_id/usr/.ald_dep" || iprint "Saving new deployment failed, naming out of sync."
@@ -77,12 +86,8 @@ setup_dep() {
     pprint "Unlocking image storage..."
     mountpoint "${ALD_PATH:?}" &>/dev/null && umount -f "${ALD_PATH:?}"
 
-    pprint "Creating directories..."
-    mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
-    mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
-
     pprint "Syncing image root to fs..."
-    podman create --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
+    podman create --replace --name ald-tmp "$SOURCE_IMAGE" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
     MOUNTC="$(podman mount ald-tmp)"
     mkdir -p "${ALD_PATH:?}/image"
     sync_image "$MOUNTC" "$next_id"
