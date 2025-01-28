@@ -1,6 +1,7 @@
 #!/usr/bin/env
 
 
+# Check for and init bootloader update for specific distro
 update_bootloader() {
     if [[ "$*" == *"--fg"* ]]; then
         fedora_grub
@@ -10,6 +11,7 @@ update_bootloader() {
 }
 
 
+# Bootloader update for fedora grub2-x86_64
 fedora_grub() {
     mkdir "${ALD_PATH:?}/tmp-boot"
     cat > "${ALD_PATH:?}/tmp-boot/Containerfile" << EOF

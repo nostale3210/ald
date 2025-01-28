@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 
+# Check for systemd-inhibit availabilty and re-exec self if available
 if systemd-inhibit --who="ald" --what="idle" sleep 0.01 &>/dev/null && [[ "$(id -u)" == "0" ]]; then
     if ! { systemd-inhibit --list | grep -q ald-rootful-ops ; }; then
         set -e
@@ -11,7 +12,8 @@ if systemd-inhibit --who="ald" --what="idle" sleep 0.01 &>/dev/null && [[ "$(id 
 fi
 
 
-if [[ "$*" == *"--init"* ]]; then
+# Check if running in initramfs and set/adjust paths
+if [[ "$*" == *"--rootd"* ]]; then
     declare -xgr PREFIX="${*: -1}"
 else
     declare -xgr PREFIX=""
@@ -21,6 +23,7 @@ declare -xgr ALD_PATH="$PREFIX/.ald"
 declare -xgr CONFIG_PATH="$PREFIX${CONFIG_PATH:-/etc/ald}"
 
 
+# Source function definitions
 if [[ -d /usr/lib/ald ]]; then
     for func in /usr/lib/ald/*; do
         if [[ -f "$func" ]]; then
@@ -32,6 +35,7 @@ else
 fi
 
 
+# Check output capabilities and acquire file lock
 if [[ "$(id -u)" == "0" ]]; then
     [[ ! -f "${CONFIG_PATH:?}/.ald.lock" ]] && \
         mkdir -p "$CONFIG_PATH" && touch "${CONFIG_PATH:?}/.ald.lock"
@@ -58,6 +62,7 @@ if [[ "$(id -u)" == "0" ]]; then
 fi
 
 
+# Source ald-config and set values
 source "$CONFIG_PATH/ald-config" &>/dev/null || iprint "No config found, using defaults..."
 
 declare -xg SOURCE_IMAGE="${SOURCE_IMAGE:-ghcr.io/nostale3210/timesinkc-main:latest}"
@@ -68,6 +73,7 @@ declare -xg STATE="${ALD_STATE:-keep}"
 declare -xgr KEEP_DEPS="${KEEP_DEPS:-4}"
 
 
+# Run the requested function according to permissions
 if [[ "$(id -u)" != "0" ]]; then
     case "$1" in
         help)

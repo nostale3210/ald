@@ -29,4 +29,4 @@ mount -o remount,rw "$sysroot"
 echo "Current: $active_boot"
 echo "Cmdline: $ald_boot (next)"
 
-ald swap "$ald_boot" --init "$sysroot"
+ald swap "$ald_boot" --rootd "$sysroot"

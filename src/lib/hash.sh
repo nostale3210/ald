@@ -38,10 +38,10 @@ verify_usr() {
 
     if [[ "$(cat /usr/.ald_dep)" != "$dep" ]]; then
         tmp="\\${ALD_PATH:?}"
-        csums="$(cat "${ALD_PATH:?}/.$dep" | sed "s/^\(.*\s\)/\1$tmp\/$dep/")"
+        csums="$(cat "${ALD_PATH:?}/.$dep" | sed "s/^\([0-9A-Za-z]*\s*\)/\1$tmp\/$dep/")"
     else
         csums="$(cat "${ALD_PATH:?}/.$dep")"
     fi
 
-    cksum -a blake2b -c <<< "$csums"
+    { cksum -a blake2b -c <<< "$csums" | grep -v OK ; } || iprint "No mismatches found!"
 }

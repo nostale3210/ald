@@ -12,6 +12,8 @@ print_help() {
     printf "\tswap\t\tReplace the currently active deployment with another specified, available one\n"
     printf "\trm\t\tRemove a specified, available deployment\n"
     printf "\tgc\t\tRemove old deployments until only n=KEEP_DEPS remain\n"
+    printf "\thash\t\tCalculate hashes of all files in /usr (for use in Container build)\n"
+    printf "\tverify\t\tCompare a deployments /usr to the precalculated hashes\n"
 
     printf "\tdep\t\tDeploy new versions\n"
     printf "\t\t\tOptions:\n"
@@ -37,6 +39,10 @@ print_help() {
     printf "\tbootloader_update\tUpdate the system's bootloader\n"
     printf "\t\t\tOptions (one is required):\n"
     printf "\t\t\t\t--fg\tUpdate grub on fedora x86_64 systems\n"
+
+    printf "\n\033[1mGlobal Options:\033[0m\n"
+    printf "\t--rootd\t\tSpecify root dir other than /\n"
+    printf "\t\t\tThe last argument (\${*: -1}) will be selected as the new root path\n"
 }
 
 
@@ -76,7 +82,7 @@ show_updates() {
     if [[ -n "$2" && "$2" != "$(cat "/usr/.ald_dep")" ]]; then NEW_DEP="${ALD_PATH:?}/$2"; else NEW_DEP="/"; fi
     iprint "Comparing $OLD_DEP and $NEW_DEP:"
     rpm -qa --root="$OLD_DEP" | sort > "$HOME/.old" || { rm "$HOME/.old" && fail_ex "-1" "Couldn't retrieve packages from $OLD_DEP."; }
-    rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || { rm "$HOME/"{.old,.new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP."; }
+    rpm -qa --root="$NEW_DEP" | sort > "$HOME/.new" || { rm "$HOME/".{old,new} && fail_ex "-1" "Couldn't retrieve packages from $NEW_DEP."; }
     diff -y "$HOME/.old" "$HOME/.new" | grep "|\|>\|<" || pprint "There doesn't seem to be a difference bewteen $OLD_DEP and $NEW_DEP."
-    rm "$HOME/"{.old,.new} || iprint "Failed to delete temporary files."
+    rm "$HOME/".{old,new} || iprint "Failed to delete temporary files."
 }
