@@ -29,6 +29,6 @@ read -rp "Edit and build local containerfile? [y/N] " use_local
 if [ "$use_local" = "y" ]; then FLAGS+=(-b) && "${EDITOR:-nano}" "${CONFIG_PATH:?}/Containerfile"; fi
 
 read -rp "Edit configuration file before installation? [y/N] " edit_file
-if [ "$edit_file" = "y" ]; then "${EDITOR:-nano}" "${ALD_PATH:?}/ald-config"; fi
+if [ "$edit_file" = "y" ]; then "${EDITOR:-nano}" "${CONFIG_PATH:?}/ald-config"; fi
 
 /usr/bin/ald init "${FLAGS[@]}"

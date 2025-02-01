@@ -67,10 +67,8 @@ init_ald() {
         { grep -q options "${ALD_PATH:?}/boot.conf" && sed -i "s/^options \(.*\)$/options \1 ald.boot=INSERT_DEPLOYMENT/g" "${ALD_PATH:?}/boot.conf"; } || fail_ex "-1" "Automatic boot entry creation failed."
     fi
 
-    if [[ "$*" == "-"*"b"* ]]; then build_image && SOURCE_IMAGE="$LOCAL_TAG"; fi
     STATE="drop"
-    setup_dep
-    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "1"; fi
+    setup_dep "$@"
 
     pprint "ALD initialised. Rebooting once is needed after initializing/switching image."
 }
