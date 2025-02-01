@@ -28,6 +28,10 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
+      matrix:
+        image:
+          - timesinkc-main-ald
+          - timesinkc-cosmic-nvidia-ald
 
     steps: 
       - name: Checkout repo
@@ -45,7 +49,12 @@ jobs:
       - name: Gather environment variables
         shell: bash
         run: |
-          echo "IMAGE_NAME=timesinkc-cosmic-nvidia-ald" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${{ matrix.image }}" >> $GITHUB_ENV
+          if [[ "${{ matrix.image }}" == "timesinkc-main-ald" ]]; then
+            echo "UPSTREAM=ghcr.io/nostale3210/timesinkc-main:latest" >> $GITHUB_ENV
+          elif [[ "${{ matrix.image }}" == "timesinkc-cosmic-nvidia-ald" ]]; then
+            echo "UPSTREAM=ghcr.io/nostale3210/timesinkc-cosmic-nvidia:latest" >> $GITHUB_ENV
+          fi
 
       - name: Generate tags
         id: generate-tags
@@ -70,6 +79,7 @@ jobs:
           podman build --label=org.opencontainers.image.title=ald-cosmic-nvidia \
             --label=org.opencontainers.image.description=ald-cosmic-nvidia \
             --label=org.opencontainers.image.version=main \
+            --build-arg=UPSTREAM="${{ env.UPSTREAM }}" \
             --pull=newer --tag="localhost/timesink" \
             -f ./Containerfile.timesink
 

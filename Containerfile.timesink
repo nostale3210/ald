@@ -1,4 +1,6 @@
-FROM ghcr.io/nostale3210/timesinkc-cosmic-nvidia:latest
+ARG UPSTREAM="${UPSTREAM}"
+
+FROM "${UPSTREAM}"
 
 COPY src/ald /usr/bin/ald
 COPY src/lib /usr/lib/ald
