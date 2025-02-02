@@ -45,8 +45,7 @@ rm_deps() {
 deduplicate_boot_files() {
     pprint "Deduplicating inactive deployments..."
     read -ra available_boot_files <<< "$(find "${BOOT_PATH:?}" -maxdepth 1 -type d -name "[0-9]*" -not -path "${BOOT_PATH:?}/$(cat "/usr/.ald_dep")" | tr "\n" " ")"
-    if [[ "$tput_support" == "y" ]]; then echo "" > "$locsync" && tput smcup; fi
+    if [[ "$tput_support" == "y" ]]; then pprint "" && tput smcup; fi
     hardlink -tXOv -s1 "${available_boot_files[@]}"
-    if [[ "$tput_support" == "y" ]]; then tput rmcup; fi
-    echo "" > "$locsync"
+    if [[ "$tput_support" == "y" ]]; then tput rmcup && pprint ""; fi
 }
