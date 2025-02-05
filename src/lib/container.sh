@@ -39,7 +39,6 @@ sync_image() {
 
     export -f sync_batch
     export -f fail_ex
-    export ALD_PATH
     find "$MOUNTC"/{usr,etc} ! -type d -printf "%s\t%p\0" | sort -znr | cut -z -f2- | \
         sed -z "s|^\($MOUNTC\)|\1/.|g" | \
         xargs -0 -n5000 -P"$(("$(nproc --all)"/2))" bash -c 'sync_batch "$@"' _ &>/dev/null

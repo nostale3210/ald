@@ -29,7 +29,6 @@ create_deployment() {
 
 
 reset_state() {
-    pprint "Syncing absolutely required config..."
     cp -rfa --parents /etc/fstab /etc/crypttab /etc/locale.conf /etc/localtime /etc/adjtime \
         /etc/sudoers.d /etc/group /etc/gshadow /etc/subgid /etc/subuid \
         /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
@@ -39,14 +38,42 @@ reset_state() {
 }
 
 
+sync_state() {
+    next_id="$1"
+
+    sync_file() {
+        file="$1"
+
+        cp -rfa --parents "$file" "${ALD_PATH:?}/$next_id/" ||
+            fail_ex "$next_id" "Couldn't sync config files..."
+    }
+
+    export -f fail_ex
+    export -f pprint
+    export -f sync_file
+    export next_id
+
+    find /etc ! -type d | \
+        xargs -I{} -P"$(("$(nproc --all)"/2))" stat --printf "%Y\t%n\0" {} 2>/dev/null | \
+        xargs -0 -I{} -P"$(("$(nproc --all)"/2))" \
+        bash -c 'test "$(echo {} | cut -d" " -f1)" == 0 || echo {}' | cut -d" " -f2 | \
+        xargs -n1 bash -c 'sync_file "$@"' _
+
+    unset -f sync_file
+
+    reset_state "$next_id"
+}
+
+
 system_config() {
     next_id="$1"
 
     pprint "Syncing system configuration..."
     if [[ "$STATE" == "drop" ]]; then
+        pprint "Syncing absolutely required config..."
         reset_state "$next_id"
     else
-        rsync -aHlx /etc "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place system config."
+        sync_state "$next_id"
     fi
     podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
     podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
