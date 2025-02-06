@@ -71,7 +71,7 @@ apply_selinux_policy() {
     pprint "Relabeling deployment $1..."
     restorecon -RF "${BOOT_PATH:?}"
 
-    setfiles -T "$(("$(nproc --all)"/2))" -r "${ALD_PATH:?}/$nextdep" \
+    setfiles -F -T "$(("$(nproc --all)"/2))" -r "${ALD_PATH:?}/$nextdep" \
         "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" \
-        "${ALD_PATH:?}/$nextdep"
+        "${ALD_PATH:?}/$nextdep" 2>/dev/null
 }
