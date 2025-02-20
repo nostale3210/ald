@@ -34,7 +34,7 @@ reset_state() {
         /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
         /etc/firewalld /etc/environment /etc/hostname \
         /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers /etc/ald \
-        "${ALD_PATH:?}/$1/" || fail_ex "$1" "Resetting /etc failed."
+        "${ALD_PATH:?}/$1/" 2>/dev/null || iprint "Some files couldn't be synced to new /etc."
 }
 
 
