@@ -11,6 +11,7 @@ on:
       - 'src/**'
       - 'tools/**'
       - 'Containerfile.timesink'
+      - 'Containerfile.void'
       - 'librarizer'
       - '.github/workflows/build-timesink.yml'
   workflow_dispatch:
@@ -32,6 +33,7 @@ jobs:
         image:
           - timesinkc-main-ald
           - timesinkc-cosmic-nvidia-ald
+          - timesinkc-void
 
     steps: 
       - name: Checkout repo
@@ -52,8 +54,13 @@ jobs:
           echo "IMAGE_NAME=${{ matrix.image }}" >> $GITHUB_ENV
           if [[ "${{ matrix.image }}" == "timesinkc-main-ald" ]]; then
             echo "UPSTREAM=ghcr.io/nostale3210/timesinkc-main:latest" >> $GITHUB_ENV
+            echo "CONTAINERFILE=Containerfile.timesink" >> $GITHUB_ENV
           elif [[ "${{ matrix.image }}" == "timesinkc-cosmic-nvidia-ald" ]]; then
             echo "UPSTREAM=ghcr.io/nostale3210/timesinkc-cosmic-nvidia:latest" >> $GITHUB_ENV
+            echo "CONTAINERFILE=Containerfile.timesink" >> $GITHUB_ENV
+          elif [[ "${{ matrix.image }}" == "timesinkc-void" ]]; then
+            echo "UPSTREAM=ghcr.io/void-linux/void-glibc-full:latest" >> $GITHUB_ENV
+            echo "CONTAINERFILE=Containerfile.void" >> $GITHUB_ENV
           fi
 
       - name: Generate tags
@@ -76,12 +83,12 @@ jobs:
       - name: Build image
         shell: bash
         run: |
-          podman build --label=org.opencontainers.image.title=ald-cosmic-nvidia \
-            --label=org.opencontainers.image.description=ald-cosmic-nvidia \
+          podman build --label=org.opencontainers.image.title=ald-void \
+            --label=org.opencontainers.image.description=ald-void \
             --label=org.opencontainers.image.version=main \
             --build-arg=UPSTREAM="${{ env.UPSTREAM }}" \
             --pull=newer --tag="localhost/timesink" \
-            -f ./Containerfile.timesink
+            -f ./"$CONTAINERFILE"
 
       - name: Push image
         shell: bash
