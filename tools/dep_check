@@ -50,6 +50,7 @@ declare -n sync_image=sync_images
 setup_deps=(
     "cp:"
     "mkdir:"
+    "mkfs.erofs:"
     "mount:"
     "umount:"
     "podman:"

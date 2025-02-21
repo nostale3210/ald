@@ -11,6 +11,13 @@ COPY boot/ald-boot.sh /usr/libexec/ald-boot.sh
 COPY tools/librarizer .
 COPY tools/dep_check .
 
+COPY move-mount-beneath /move-mount-beneath
+
+RUN dnf install -y gcc
+
+RUN gcc /move-mount-beneath/move-mount.c -o /usr/bin/mmb && \
+    rm -rf /move-mount-beneath
+
 RUN bash librarizer && \
     sed "/# Dependencies/r drc_libs" /usr/lib/dracut/modules.d/90ald/module-setup.sh && \
     sed -i "/# Dependencies/r drc_libs" /usr/lib/dracut/modules.d/90ald/module-setup.sh && \
