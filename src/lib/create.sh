@@ -18,12 +18,12 @@ create_deployment() {
         }
     }
 
-    mkdir -p "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment root."
+    mkdir -p "${ALD_PATH:?}/$next_id/usr" || fail_ex "$next_id" "Couldn't create deployment root."
     mkdir -p "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't create deployment boot directory."
 
     pprint "Creating deployment $next_id..."
-    echo "$next_id" > "${ALD_PATH:?}/image/usr/.ald_dep" || iprint "Saving new deployment failed, naming out of sync."
-    mkfs.erofs --all-root --all-time -T0 -x6 -d0 "${ALD_PATH:?}/$next_id/$next_id.efs" "${ALD_PATH:?}/image/usr" &>/dev/null || fail_ex "$next_id" "Couldn't sync files."
+    rsync -aHlx --link-dest="../../image/usr/" "${ALD_PATH:?}/image/usr/" "${ALD_PATH:?}/$next_id/usr/" || fail_ex "$next_id" "Couldn't sync files."
+    echo "$next_id" > "${ALD_PATH:?}/$next_id/usr/.ald_dep" || iprint "Saving new deployment failed, naming out of sync."
     rsync -aHlx "${ALD_PATH:?}/image/etc" "${ALD_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't sync files."
 }
 
@@ -34,21 +34,24 @@ reset_state() {
         /etc/NetworkManager/system-connections /etc/vconsole.conf /etc/pki \
         /etc/firewalld /etc/environment /etc/hostname \
         /etc/X11/xorg.conf.d/00-keyboard.conf /etc/sudoers /etc/ald \
-        "${ALD_PATH:?}/image/" 2>/dev/null || iprint "Some files couldn't be synced to new /etc."
+        "${ALD_PATH:?}/$1/" 2>/dev/null || iprint "Some files couldn't be synced to new /etc."
 }
 
 
 sync_state() {
+    next_id="$1"
+
     sync_file() {
         file="$1"
 
-        cp -rfa --parents "$file" "${ALD_PATH:?}/image/" ||
+        cp -rfa --parents "$file" "${ALD_PATH:?}/$next_id/" ||
             fail_ex "$next_id" "Couldn't sync config files..."
     }
 
     export -f fail_ex
     export -f pprint
     export -f sync_file
+    export next_id
 
     find /etc ! -type d | \
         xargs -I{} -P"$(("$(nproc --all)"/2))" stat --printf "%Y\t%n\0" {} 2>/dev/null | \
@@ -58,7 +61,7 @@ sync_state() {
 
     unset -f sync_file
 
-    reset_state
+    reset_state "$next_id"
 }
 
 
@@ -68,15 +71,15 @@ system_config() {
     pprint "Syncing system configuration..."
     if [[ "$STATE" == "drop" ]]; then
         pprint "Syncing absolutely required config..."
-        reset_state
+        reset_state "$next_id"
     else
-        sync_state
+        sync_state "$next_id"
     fi
     podman cp ald-tmp:/etc/passwd "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
     podman cp ald-tmp:/etc/shadow "${ALD_PATH:?}" || fail_ex "$next_id" "Couldn't place system config."
 
-    sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/image/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
-    sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/image/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/passwd "${ALD_PATH:?}/passwd" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/passwd" || fail_ex "$next_id" "Couldn't place system config."
+    sort /etc/shadow "${ALD_PATH:?}/shadow" | awk -F':' '!a[$1]++' > "$ALD_PATH/$next_id/etc/shadow" || fail_ex "$next_id" "Couldn't place system config."
     rm "${ALD_PATH:?}"/{passwd,shadow} || fail_ex "$next_id" "Couldn't place system config."
 }
 
@@ -84,10 +87,12 @@ system_config() {
 boot_entry() {
     next_id="$1"
 
-    new_kernel="$(find "${ALD_PATH:?}/image/usr/lib/modules" -name vmlinuz | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new kernel."
-    new_init="$(find "${ALD_PATH:?}/image/usr/lib/modules" -name initramfs.img | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new initramfs."
+    new_kernel="$(find "${ALD_PATH:?}/$next_id/usr/lib/modules" -name vmlinuz | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new kernel."
+    new_init="$(find "${ALD_PATH:?}/$next_id/usr/lib/modules" -name initramfs.img | sort | tail -n1)" || fail_ex "$next_id" "Couldn't place new initramfs."
     cp -rfa "$new_kernel" "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place new kernel."
     cp -rfa "$new_init" "${BOOT_PATH:?}/$next_id" || fail_ex "$next_id" "Couldn't place new initramfs."
+
+    deduplicate_boot_files
 
     pprint "Preparing boot entry..."
     cp -rfa "${ALD_PATH:?}/boot.conf" "${BOOT_PATH:?}/loader/entries/$next_id.conf" || fail_ex "$next_id" "Couldn't place boot config."
@@ -115,13 +120,13 @@ setup_dep() {
     sync_image "$MOUNTC" "$next_id"
     podman unmount ald-tmp &>/dev/null || iprint "Temporary container still mounted!"
 
-    system_config "$next_id"
-
-    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
-
     create_deployment "$next_id"
 
+    system_config "$next_id"
+
     podman rm ald-tmp &>/dev/null || fail_ex "$next_id" "Couldn't remove temporary container."
+
+    if [[ "$*" == "-"*"z"* ]]; then apply_selinux_policy "$next_id"; fi
 
     boot_entry "$next_id"
 

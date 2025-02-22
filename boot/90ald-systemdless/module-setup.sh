@@ -14,10 +14,6 @@ depends() {
     return 0
 }
 
-installkernel() {
-    hostonly='' instmods erofs loop
-}
-
 install() {
     
     inst_dir /usr/lib/ald

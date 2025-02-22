@@ -51,6 +51,8 @@ fail_ex() {
         podman rm ald-utils &>/dev/null
         podman rm ald-boot &>/dev/null
         rm -rf "${ALD_PATH:?}/${1:?}"
+        chattr -f -i "${ALD_PATH:?}/init/$1.sh"
+        rm -rf "${ALD_PATH:?}/init/${1:?}.sh"
         rm -rf "${BOOT_PATH:?}/${1:?}"
         rm -rf "${BOOT_PATH:?}/loader/entries/${1:?}.conf"
 
@@ -64,10 +66,12 @@ fail_ex() {
 
 
 apply_selinux_policy() {
+    nextdep="$1"
+
     pprint "Relabeling deployment $1..."
     restorecon -RF "${BOOT_PATH:?}"
 
-    setfiles -F -T "$(("$(nproc --all)"/2))" -r "${ALD_PATH:?}/image" \
-        "${ALD_PATH:?}/image/etc/selinux/targeted/contexts/files/file_contexts" \
-        "${ALD_PATH:?}/image" 2>/dev/null
+    setfiles -F -T "$(("$(nproc --all)"/2))" -r "${ALD_PATH:?}/$nextdep" \
+        "${ALD_PATH:?}/$nextdep/etc/selinux/targeted/contexts/files/file_contexts" \
+        "${ALD_PATH:?}/$nextdep" 2>/dev/null
 }
