@@ -30,7 +30,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Enable sigstore and init submodules
+      - name: Enable sigstore
         shell: bash
         run: |
           sudo mkdir -p /etc/containers/registries.d
@@ -38,8 +38,6 @@ jobs:
           echo "docker:" | sudo tee /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
           echo "  ${{ env.IMAGE_REGISTRY }}:" | sudo tee -a /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
           echo "    use-sigstore-attachments: true" | sudo tee -a /etc/containers/registries.d/"${{ github.repository_owner }}".yaml
-
-          git submodule update --init --recursive
 
       - name: Gather environment variables
         shell: bash
@@ -70,7 +68,6 @@ jobs:
             --label=org.opencontainers.image.description=ald-utils \
             --label=org.opencontainers.image.version=main \
             --pull=newer --tag="localhost/ald-utils" \
-            --target=final \
             -f ./Containerfile
 
       - name: Push image
