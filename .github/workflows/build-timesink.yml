@@ -32,8 +32,6 @@ jobs:
       matrix:
         image:
           - timesinkc-main-ald
-          - timesinkc-cosmic-nvidia-ald
-          - timesinkc-void
 
     steps: 
       - name: Checkout repo
